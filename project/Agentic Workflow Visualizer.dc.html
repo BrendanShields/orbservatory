@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta charset="utf-8">
+<title>Agentic Workflow Visualizer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;padding:0;background:#06141a;overflow:hidden}
+*{box-sizing:border-box}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:rgba(130,190,210,.16);border-radius:99px}
+::-webkit-scrollbar-track{background:transparent}
+select option{background:#0b2027;color:#d7ecf2}
+textarea:focus,select:focus{outline:1px solid rgba(120,210,235,.35)}
+@keyframes awvIn{from{opacity:0;transform:translateX(14px)}to{opacity:1;transform:none}}
+@keyframes awvFade{from{opacity:0}to{opacity:1}}
+</style>
+<script src="workflows.js"></script>
+</helmet>
+
+<div ref="{{ rootRef }}" style="width:100vw;height:100vh;display:grid;grid-template-rows:auto 1fr auto;background:radial-gradient(1300px 900px at 50% 28%, #0a2029 0%, #06141a 58%, #040d12 100%);font-family:Outfit,sans-serif;color:#d7ecf2;overflow:hidden">
+
+  <!-- ─── Header ─────────────────────────────────────── -->
+  <div style="display:flex;align-items:center;gap:16px;padding:10px 16px;border-bottom:1px solid rgba(140,200,220,.08);background:rgba(8,20,26,.72);backdrop-filter:blur(14px);position:relative;z-index:6">
+    <div style="display:flex;align-items:center;gap:11px;flex:none">
+      <div style="width:9px;height:9px;border-radius:50%;background:#7adcf2;box-shadow:0 0 12px #7adcf2,0 0 30px rgba(122,220,242,.5)"></div>
+      <div style="display:flex;flex-direction:column;gap:1px">
+        <div style="font-size:13.5px;font-weight:600;letter-spacing:.16em;color:#e8f5fa">AGENT ORCHESTRA</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:rgba(160,205,220,.5);letter-spacing:.26em">WORKFLOW SIMULATOR</div>
+      </div>
+    </div>
+    <select value="{{ scenarioValue }}" onChange="{{ onScenario }}" style="flex:none;appearance:none;-webkit-appearance:none;background:rgba(122,220,242,.07);border:1px solid rgba(140,200,220,.16);color:#d7ecf2;border-radius:9px;padding:7px 30px 7px 12px;font-family:Outfit,sans-serif;font-size:11.5px;font-weight:500;cursor:pointer;background-image:linear-gradient(45deg,transparent 50%,rgba(180,220,235,.7) 50%),linear-gradient(135deg,rgba(180,220,235,.7) 50%,transparent 50%);background-position:calc(100% - 16px) 55%,calc(100% - 11px) 55%;background-size:5px 5px,5px 5px;background-repeat:no-repeat">
+      <sc-for list="{{ scenarioOpts }}" as="o" hint-placeholder-count="1">
+        <option value="{{ o.i }}">{{ o.name }}</option>
+      </sc-for>
+    </select>
+    <div style="flex:1;min-width:0;font-family:'JetBrains Mono',monospace;font-size:10px;color:rgba(160,205,220,.55);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ scenarioDesc }}</div>
+    <button onClick="{{ onFit }}" style="flex:none;background:rgba(122,220,242,.07);border:1px solid rgba(140,200,220,.16);color:#cfe6ee;border-radius:9px;padding:7px 12px;font-family:Outfit,sans-serif;font-size:11px;font-weight:500;cursor:pointer" style-hover="background:rgba(122,220,242,.14)">⤢ Fit</button>
+    <button onClick="{{ onToggleEditor }}" style="flex:none;background:rgba(243,196,126,.09);border:1px solid rgba(243,196,126,.28);color:#f3c47e;border-radius:9px;padding:7px 13px;font-family:'JetBrains Mono',monospace;font-size:10.5px;font-weight:500;cursor:pointer" style-hover="background:rgba(243,196,126,.16)">{ } define workflow</button>
+  </div>
+
+  <!-- ─── Stage ──────────────────────────────────────── -->
+  <div style="position:relative;min-height:0">
+    <canvas ref="{{ cvRef }}" style="position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none"></canvas>
+
+    <div style="position:absolute;left:14px;bottom:12px;font-family:'JetBrains Mono',monospace;font-size:9px;color:rgba(160,205,220,.38);pointer-events:none;letter-spacing:.05em">drag to pan · scroll to zoom · dbl-click to fit · click a node to inspect · space play/pause · ←/→ step</div>
+
+    <!-- Agent rail -->
+    <sc-if value="{{ railOpen }}" hint-placeholder-val="{{ true }}">
+      <div style="position:absolute;left:14px;top:14px;bottom:38px;width:236px;display:flex;flex-direction:column;background:rgba(9,23,30,.74);border:1px solid rgba(140,200,220,.1);border-radius:14px;backdrop-filter:blur(16px);overflow:hidden;animation:awvFade .2s ease">
+        <div style="display:flex;align-items:center;gap:8px;padding:11px 12px 9px;border-bottom:1px solid rgba(140,200,220,.08);flex:none">
+          <span style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.22em;color:rgba(160,205,220,.6)">AGENTS</span>
+          <span style="flex:1;font-family:'JetBrains Mono',monospace;font-size:9px;color:rgba(160,205,220,.4)">{{ agentStats }}</span>
+          <button onClick="{{ onRail }}" style="background:none;border:none;color:rgba(160,205,220,.6);cursor:pointer;font-size:12px;padding:0 2px">‹</button>
+        </div>
+        <div style="flex:1;overflow-y:auto;padding:4px 0">
+          <sc-for list="{{ agentRows }}" as="row" hint-placeholder-count="6">
+            <div onClick="{{ row.onClick }}" style="padding:6px 12px 7px;cursor:pointer;opacity:{{ row.alpha }};background:{{ row.bg }};border-left:2px solid {{ row.edge }}" style-hover="background:rgba(122,220,242,.06)">
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="width:8px;height:8px;border-radius:50%;background:{{ row.color }};box-shadow:0 0 8px {{ row.color }};flex:none"></span>
+                <span style="font-size:11.5px;font-weight:500;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ row.name }}</span>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:{{ row.statusColor }};letter-spacing:.06em">{{ row.statusLabel }}</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;margin-top:4px;padding-left:16px">
+                <div style="flex:1;height:3px;border-radius:99px;background:rgba(150,210,230,.1);overflow:hidden">
+                  <div style="height:100%;border-radius:99px;width:{{ row.pctStr }};background:{{ row.barColor }};transition:width .13s linear"></div>
+                </div>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:rgba(160,205,220,.55);flex:none;min-width:34px;text-align:right">{{ row.tokStr }}</span>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-if>
+    <sc-if value="{{ railClosed }}" hint-placeholder-val="{{ false }}">
+      <button onClick="{{ onRail }}" style="position:absolute;left:14px;top:14px;background:rgba(9,23,30,.74);border:1px solid rgba(140,200,220,.14);color:#cfe6ee;border-radius:10px;padding:8px 12px;font-family:'JetBrains Mono',monospace;font-size:10px;cursor:pointer;backdrop-filter:blur(10px)" style-hover="background:rgba(122,220,242,.1)">☰ agents</button>
+    </sc-if>
+
+    <!-- Inspector panel -->
+    <sc-if value="{{ hasSel }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;right:14px;top:14px;bottom:38px;width:324px;display:flex;flex-direction:column;background:rgba(9,23,30,.8);border:1px solid rgba(140,200,220,.13);border-radius:14px;backdrop-filter:blur(18px);overflow:hidden;animation:awvIn .22s ease">
+        <div style="display:flex;align-items:center;gap:10px;padding:13px 14px 11px;border-bottom:1px solid rgba(140,200,220,.08);flex:none">
+          <span style="width:14px;height:14px;border-radius:50%;background:{{ selColor }};box-shadow:0 0 14px {{ selColor }},0 0 34px {{ selColor }};flex:none"></span>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ selName }}</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:rgba(160,205,220,.5);letter-spacing:.14em">{{ selRole }}</div>
+          </div>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:{{ selStatusColor }};border:1px solid {{ selStatusColor }};border-radius:6px;padding:2px 7px;letter-spacing:.08em;flex:none">{{ selStatus }}</span>
+          <button onClick="{{ onCloseSel }}" style="background:none;border:none;color:rgba(160,205,220,.6);cursor:pointer;font-size:15px;padding:0 2px;flex:none">×</button>
+        </div>
+        <div style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column">
+          <div style="padding:11px 14px 4px;font-size:11px;line-height:1.5;color:rgba(185,212,221,.85);flex:none">{{ selTask }}</div>
+          <div style="padding:10px 14px 4px;flex:none">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;letter-spacing:.22em;color:rgba(160,205,220,.55);margin-bottom:7px">CONTEXT WINDOW</div>
+            <div style="display:flex;align-items:baseline;gap:7px">
+              <span style="font-family:'JetBrains Mono',monospace;font-size:21px;font-weight:700;color:#e8f5fa">{{ selTok }}</span>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:rgba(160,205,220,.55)">/ {{ selLimit }} tokens</span>
+              <span style="flex:1"></span>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:{{ selBarColor }}">{{ selPct }}%</span>
+            </div>
+            <div style="margin-top:7px;height:9px;border-radius:99px;background:rgba(150,210,230,.09);border:1px solid rgba(150,210,230,.08);overflow:hidden">
+              <div style="height:100%;border-radius:99px;width:{{ selPctStr }};background:linear-gradient(90deg,rgba(110,224,200,.55),{{ selBarColor }});box-shadow:0 0 10px {{ selBarColor }};transition:width .13s linear"></div>
+            </div>
+          </div>
+          <sc-if value="{{ hasSkills }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:12px 14px 2px;flex:none">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;letter-spacing:.22em;color:rgba(160,205,220,.55);margin-bottom:7px">SKILLS · TOOLS USED</div>
+              <div style="display:flex;flex-wrap:wrap;gap:5px">
+                <sc-for list="{{ selSkills }}" as="s" hint-placeholder-count="3">
+                  <span style="border:1px solid rgba(140,200,220,.16);background:rgba(122,220,242,.05);border-radius:6px;padding:3px 8px;font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#bfe0ea">{{ s.name }} <span style="color:#f3c47e">×{{ s.count }}</span></span>
+                </sc-for>
+              </div>
+            </div>
+          </sc-if>
+          <sc-if value="{{ hasChildren }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:12px 14px 2px;flex:none">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;letter-spacing:.22em;color:rgba(160,205,220,.55);margin-bottom:6px">SUB-AGENTS</div>
+              <sc-for list="{{ selChildren }}" as="c" hint-placeholder-count="2">
+                <div onClick="{{ c.onClick }}" style="display:flex;align-items:center;gap:7px;padding:4px 2px;cursor:pointer;border-radius:6px" style-hover="background:rgba(122,220,242,.06)">
+                  <span style="width:6px;height:6px;border-radius:50%;background:{{ c.color }};box-shadow:0 0 6px {{ c.color }};flex:none"></span>
+                  <span style="font-size:10.5px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ c.name }}</span>
+                  <div style="width:52px;height:3px;border-radius:99px;background:rgba(150,210,230,.1);overflow:hidden;flex:none">
+                    <div style="height:100%;width:{{ c.pctStr }};background:{{ c.barColor }};border-radius:99px"></div>
+                  </div>
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:{{ c.statusColor }};flex:none;min-width:32px;text-align:right">{{ c.statusLabel }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+          <div style="padding:12px 14px 12px;flex:none">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;letter-spacing:.22em;color:rgba(160,205,220,.55);margin-bottom:5px">CONTEXT TRANSCRIPT</div>
+            <sc-for list="{{ selLog }}" as="e" hint-placeholder-count="4">
+              <div style="display:flex;gap:7px;padding:4.5px 0;border-bottom:1px solid rgba(140,200,220,.05);font-size:10.5px;line-height:1.45;align-items:baseline">
+                <span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:rgba(160,205,220,.45);flex:none;width:33px">{{ e.time }}</span>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:{{ e.tagColor }};flex:none;width:54px;letter-spacing:.04em">{{ e.tag }}</span>
+                <span style="flex:1;color:#b9d4dd;min-width:0">{{ e.text }}</span>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:#f3c47e;flex:none">{{ e.delta }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- JSON editor -->
+    <sc-if value="{{ showEditor }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;inset:0;background:rgba(4,12,16,.62);backdrop-filter:blur(5px);display:flex;align-items:center;justify-content:center;z-index:20;animation:awvFade .15s ease">
+        <div style="width:min(780px,93%);height:min(620px,90%);display:flex;flex-direction:column;background:rgba(9,24,31,.97);border:1px solid rgba(140,200,220,.16);border-radius:16px;padding:16px 18px;gap:10px;box-shadow:0 30px 90px rgba(0,0,0,.55)">
+          <div style="display:flex;align-items:center;gap:10px;flex:none">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#f3c47e">{ }</span>
+            <span style="font-size:14px;font-weight:600">Define workflow</span>
+            <span style="flex:1;font-family:'JetBrains Mono',monospace;font-size:9px;color:rgba(160,205,220,.45)">agents[] + events[] · types: spawn · message · tool · compact · error · retry · complete</span>
+            <button onClick="{{ onCloseEditor }}" style="background:none;border:none;color:rgba(160,205,220,.6);cursor:pointer;font-size:16px">×</button>
+          </div>
+          <textarea value="{{ editorText }}" onChange="{{ onEditorChange }}" spellCheck="{{ false }}" style="flex:1;min-height:0;resize:none;background:rgba(4,13,18,.9);border:1px solid rgba(140,200,220,.12);border-radius:10px;color:#bfe0ea;font-family:'JetBrains Mono',monospace;font-size:10.5px;line-height:1.55;padding:12px"></textarea>
+          <div style="display:flex;align-items:center;gap:10px;flex:none">
+            <button onClick="{{ onApply }}" style="background:rgba(122,220,242,.16);border:1px solid rgba(122,220,242,.4);color:#aee8f7;border-radius:9px;padding:8px 16px;font-family:Outfit,sans-serif;font-size:11.5px;font-weight:600;cursor:pointer" style-hover="background:rgba(122,220,242,.24)">▶ Apply &amp; run</button>
+            <button onClick="{{ onLoadFile }}" style="background:rgba(122,220,242,.06);border:1px solid rgba(140,200,220,.16);color:#cfe6ee;border-radius:9px;padding:8px 14px;font-family:Outfit,sans-serif;font-size:11px;cursor:pointer" style-hover="background:rgba(122,220,242,.12)">Load custom-workflow.json</button>
+            <span style="flex:1;font-family:'JetBrains Mono',monospace;font-size:10px;color:#ff7a70;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ editorError }}</span>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+  </div>
+
+  <!-- ─── Timeline ───────────────────────────────────── -->
+  <div style="display:flex;align-items:center;gap:13px;padding:9px 16px 11px;border-top:1px solid rgba(140,200,220,.08);background:rgba(8,20,26,.75);backdrop-filter:blur(14px);position:relative;z-index:6">
+    <div style="display:flex;align-items:center;gap:6px;flex:none">
+      <button onClick="{{ onStepBack }}" title="previous event" style="width:28px;height:28px;border-radius:8px;background:rgba(122,220,242,.06);border:1px solid rgba(140,200,220,.14);color:#cfe6ee;cursor:pointer;font-size:10px;display:flex;align-items:center;justify-content:center" style-hover="background:rgba(122,220,242,.14)">⏮</button>
+      <button onClick="{{ onPlay }}" style="width:36px;height:36px;border-radius:50%;background:rgba(122,220,242,.14);border:1px solid rgba(122,220,242,.45);color:#aee8f7;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 16px rgba(122,220,242,.25)" style-hover="background:rgba(122,220,242,.24)">{{ playGlyph }}</button>
+      <button onClick="{{ onStepFwd }}" title="next event" style="width:28px;height:28px;border-radius:8px;background:rgba(122,220,242,.06);border:1px solid rgba(140,200,220,.14);color:#cfe6ee;cursor:pointer;font-size:10px;display:flex;align-items:center;justify-content:center" style-hover="background:rgba(122,220,242,.14)">⏭</button>
+    </div>
+    <div style="display:flex;border:1px solid rgba(140,200,220,.14);border-radius:8px;overflow:hidden;flex:none">
+      <sc-for list="{{ speedOpts }}" as="sp" hint-placeholder-count="4">
+        <button onClick="{{ sp.onClick }}" style="background:{{ sp.bg }};border:none;color:{{ sp.color }};padding:6px 9px;font-family:'JetBrains Mono',monospace;font-size:9.5px;cursor:pointer">{{ sp.label }}</button>
+      </sc-for>
+    </div>
+    <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#aee8f7;flex:none;min-width:104px;text-align:center">{{ timeLabel }}</span>
+    <div style="flex:1;position:relative;height:42px;min-width:120px">
+      <canvas ref="{{ tlRef }}" style="position:absolute;inset:0;width:100%;height:100%;cursor:pointer"></canvas>
+    </div>
+    <div style="display:grid;grid-template-columns:auto auto auto;gap:2px 12px;flex:none;font-family:'JetBrains Mono',monospace;font-size:8px;color:rgba(160,205,220,.55)">
+      <span><span style="color:#72d6ee">▎</span>spawn</span>
+      <span><span style="color:#f3c47e">▎</span>tool</span>
+      <span><span style="color:#cfe6ee">▎</span>message</span>
+      <span><span style="color:#b4a0f2">▎</span>compact</span>
+      <span><span style="color:#ff7a70">▎</span>error</span>
+      <span><span style="color:#84e4c0">▎</span>done</span>
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;palette&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Deep Teal&quot;,&quot;Obsidian&quot;,&quot;Ink Blue&quot;,&quot;Void Violet&quot;,&quot;Carbon&quot;],&quot;default&quot;:&quot;Deep Teal&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Look&quot;},&quot;layout&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;organic&quot;,&quot;radial&quot;,&quot;fixed&quot;],&quot;default&quot;:&quot;organic&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Look&quot;},&quot;glow&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:1,&quot;min&quot;:0,&quot;max&quot;:2,&quot;step&quot;:0.1,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Look&quot;},&quot;edgeStyle&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;beams&quot;,&quot;wires&quot;],&quot;default&quot;:&quot;beams&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Look&quot;},&quot;showGrid&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Look&quot;}}">
+class Component extends DCLogic {
+  state = { tick: 0, scenarioIndex: 0, playing: false, speed: 1, selectedId: null, showEditor: false, editorText: '', editorError: '', railOpen: true, ready: false };
+
+  // ── lifecycle ──────────────────────────────────────────
+  componentDidMount() {
+    this.cam = { x: 0, y: 0, s: 1 };
+    this.userCam = false; this.focusId = null;
+    this.nodes = new Map();
+    this.simT = 0; this._last = 0;
+    this.sprites = {}; this.hoverId = null; this._dirty = true;
+    this._rowCb = {}; this._spdCb = {};
+    this.COL = { gold: '#f3c47e', cyan: '#72d6ee', purple: '#b4a0f2', pink: '#ee9fbe', green: '#84e4c0', red: '#ff7a70', slate: '#93aab4' };
+    this.TICK = { spawn: '#72d6ee', message: 'rgba(207,230,238,.55)', tool: '#f3c47e', compact: '#b4a0f2', error: '#ff7a70', retry: '#84e4c0', complete: '#84e4c0' };
+    this.PALETTES = {
+      'Deep Teal':    { stops: ['#0a2029', '#06141a', '#040d12'], grid: 'rgba(140,200,220,.055)', vign: 'rgba(3,10,14,.5)' },
+      'Obsidian':     { stops: ['#151518', '#0a0a0d', '#000000'], grid: 'rgba(205,210,220,.05)',  vign: 'rgba(0,0,0,.62)' },
+      'Ink Blue':     { stops: ['#0a1626', '#050c16', '#01040a'], grid: 'rgba(150,180,225,.055)', vign: 'rgba(1,4,10,.58)' },
+      'Void Violet':  { stops: ['#151019', '#0b0710', '#020104'], grid: 'rgba(195,170,225,.05)',  vign: 'rgba(2,1,5,.6)' },
+      'Carbon':       { stops: ['#1b1b1e', '#101012', '#050506'], grid: 'rgba(212,212,218,.05)',  vign: 'rgba(0,0,0,.56)' }
+    };
+    this._key = (e) => this.onKey(e);
+    window.addEventListener('keydown', this._key);
+    this._ui = setInterval(() => {
+      if ((this.state.playing || this._dirty) && this.eng) { this._dirty = false; this.setState(s => ({ tick: s.tick + 1 })); }
+    }, 130);
+    const boot = () => {
+      if (!window.AWV_WORKFLOWS) { setTimeout(boot, 60); return; }
+      this.workflows = window.AWV_WORKFLOWS.slice();
+      this.custom = null;
+      this.loadScenario(0);
+      this.setState({ ready: true });
+    };
+    boot();
+    this._raf = requestAnimationFrame(t => this.frame(t));
+  }
+  componentDidUpdate() { this.applyBg(); }
+  palette() { return this.PALETTES[this.props.palette] || this.PALETTES['Deep Teal']; }
+  applyBg() {
+    const p = this.palette();
+    if (this.root) this.root.style.background = `radial-gradient(1300px 900px at 50% 28%, ${p.stops[0]} 0%, ${p.stops[1]} 58%, ${p.stops[2]} 100%)`;
+    if (document.body) document.body.style.background = p.stops[2];
+  }
+  componentWillUnmount() {
+    cancelAnimationFrame(this._raf); clearInterval(this._ui);
+    window.removeEventListener('keydown', this._key);
+    if (this._ro) this._ro.disconnect();
+  }
+
+  // ── parsing / engine ───────────────────────────────────
+  hash(s) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h; }
+  colorOf(a) { return this.COL[a.def.color] || a.def.color || this.COL.cyan; }
+  radius(a) { return [26, 16, 11.5, 9, 8][Math.min(a.depth, 4)]; }
+
+  parse(sc) {
+    const agents = new Map();
+    (sc.agents || []).forEach(d => agents.set(d.id, { def: d, id: d.id, spawnT: Infinity, completeT: Infinity, parent: null, depth: 0, kf: [], evs: [], children: [] }));
+    const evs = (sc.events || []).slice().sort((a, b) => a.t - b.t);
+    const cur = {};
+    const kf = (id, t, v) => { const a = agents.get(id); if (!a) return; v = Math.max(0, v); a.kf.push({ t, v }); cur[id] = v; };
+    evs.forEach(e => {
+      if (e.type === 'spawn') {
+        const a = agents.get(e.agent); if (!a) return;
+        a.spawnT = e.t; a.parent = (e.parent && agents.has(e.parent)) ? e.parent : null;
+        if (a.parent) agents.get(a.parent).children.push(e.agent);
+        kf(e.agent, e.t, 0); kf(e.agent, e.t + 500, e.tokens || 2000);
+      } else if (e.type === 'message' && e.to && agents.has(e.to)) {
+        kf(e.to, e.t, (cur[e.to] || 0) + (e.tokens || 0));
+      } else if (e.type === 'tool' && agents.has(e.agent)) {
+        kf(e.agent, e.t, (cur[e.agent] || 0) + (e.tokens || 0));
+      } else if (e.type === 'compact' && agents.has(e.agent)) {
+        e._drop = Math.max(0, (cur[e.agent] || 0) - (e.to || 0));
+        kf(e.agent, Math.max(0, e.t - 260), cur[e.agent] || 0); kf(e.agent, e.t, e.to || 0);
+      } else if (e.type === 'complete' && agents.has(e.agent)) {
+        agents.get(e.agent).completeT = e.t;
+      }
+      if (e.agent && agents.has(e.agent)) agents.get(e.agent).evs.push(e);
+      if (e.type === 'message') {
+        if (e.from && agents.has(e.from)) agents.get(e.from).evs.push(e);
+        if (e.to && agents.has(e.to)) agents.get(e.to).evs.push(e);
+      }
+    });
+    agents.forEach(a => { let d = 0, p = a.parent; while (p) { d++; p = agents.get(p).parent; } a.depth = d; a.kf.sort((x, y) => x.t - y.t); });
+    return { sc, agents, evs, duration: (evs.length ? evs[evs.length - 1].t : 0) + 2500, order: (sc.agents || []).map(a => a.id) };
+  }
+
+  loadScenario(i) {
+    const sc = i === -1 ? this.custom : this.workflows[i];
+    if (!sc) return;
+    this.eng = this.parse(sc);
+    this.computeStatic();
+    this.simT = 0; this.nodes.clear(); this.userCam = false; this.focusId = null; this._dirty = true;
+    this.setState({ scenarioIndex: i, selectedId: null, playing: true });
+  }
+
+  tokensAt(a, t) {
+    const k = a.kf; if (!k.length || t < k[0].t) return 0;
+    if (t >= k[k.length - 1].t) return k[k.length - 1].v;
+    let lo = 0, hi = k.length - 1;
+    while (lo < hi - 1) { const m = (lo + hi) >> 1; if (k[m].t <= t) lo = m; else hi = m; }
+    const A = k[lo], B = k[hi], f = (t - A.t) / Math.max(1, B.t - A.t);
+    return A.v + (B.v - A.v) * f;
+  }
+  statusAt(a, t) {
+    if (t < a.spawnT) return 'pending';
+    if (t >= a.completeT) return 'complete';
+    let err = false;
+    for (const e of a.evs) {
+      if (e.t > t) break;
+      if (e.type === 'error' && e.agent === a.id) err = true;
+      else if (err && e.agent === a.id && (e.type === 'retry' || e.type === 'tool' || e.type === 'complete')) err = false;
+    }
+    return err ? 'error' : 'active';
+  }
+  ringColor(p) { return p < 0.6 ? '#6fe3c3' : p < 0.85 ? '#f3c47e' : '#ff7a70'; }
+  powerDown(a, t) { return a.completeT < Infinity ? Math.min(1, Math.max(0, (t - a.completeT) / 1400)) : 0; }
+
+  // ── canvas binding ─────────────────────────────────────
+  bindCanvas(el) {
+    if (!el || el === this.cv) return;
+    this.cv = el; this.ctx = el.getContext('2d');
+    let down = null;
+    el.addEventListener('pointerdown', e => {
+      el.setPointerCapture(e.pointerId);
+      const hit = this.hitTest(e.offsetX, e.offsetY);
+      down = { x: e.offsetX, y: e.offsetY, moved: 0, node: hit, cx: this.cam.x, cy: this.cam.y };
+    });
+    el.addEventListener('pointermove', e => {
+      if (down) {
+        const dx = e.offsetX - down.x, dy = e.offsetY - down.y;
+        down.moved += Math.abs(dx) + Math.abs(dy);
+        if (down.node) {
+          const n = down.node; const w = this.toWorld(e.offsetX, e.offsetY);
+          n.x = w.x; n.y = w.y; n.vx = 0; n.vy = 0;
+        } else if (down.moved > 4) {
+          this.userCam = true; this.focusId = null;
+          this.cam.x = down.cx - dx / this.cam.s; this.cam.y = down.cy - dy / this.cam.s;
+        }
+      } else {
+        const hit = this.hitTest(e.offsetX, e.offsetY);
+        this.hoverId = hit ? hit.id : null;
+        el.style.cursor = hit ? 'pointer' : 'default';
+      }
+    });
+    el.addEventListener('pointerup', e => {
+      if (down && down.moved < 5) {
+        this.setState({ selectedId: down.node ? down.node.id : null }); this._dirty = true;
+      }
+      down = null;
+    });
+    el.addEventListener('wheel', e => {
+      e.preventDefault();
+      const w = this.cv.clientWidth, h = this.cv.clientHeight;
+      const f = Math.exp(-e.deltaY * 0.0013);
+      const s2 = Math.min(3, Math.max(0.12, this.cam.s * f));
+      const wp = this.toWorld(e.offsetX, e.offsetY);
+      this.cam.x = wp.x - (e.offsetX - w / 2) / s2;
+      this.cam.y = wp.y - (e.offsetY - h / 2) / s2;
+      this.cam.s = s2; this.userCam = true; this.focusId = null;
+    }, { passive: false });
+    el.addEventListener('dblclick', () => { this.userCam = false; this.focusId = null; });
+    this._ro = new ResizeObserver(() => { this._dirty = true; });
+    this._ro.observe(el);
+  }
+  bindTL(el) {
+    if (!el || el === this.tl) return;
+    this.tl = el; this.tctx = el.getContext('2d');
+    const seek = e => {
+      if (!this.eng) return;
+      const r = el.getBoundingClientRect();
+      const p = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+      this.simT = p * this.eng.duration; this._dirty = true;
+    };
+    el.addEventListener('pointerdown', e => { el.setPointerCapture(e.pointerId); this._scrub = true; seek(e); });
+    el.addEventListener('pointermove', e => { if (this._scrub) seek(e); });
+    el.addEventListener('pointerup', () => { this._scrub = false; });
+  }
+  toWorld(px, py) {
+    const w = this.cv.clientWidth, h = this.cv.clientHeight;
+    return { x: (px - w / 2) / this.cam.s + this.cam.x, y: (py - h / 2) / this.cam.s + this.cam.y };
+  }
+  hitTest(px, py) {
+    if (!this.cv) return null;
+    const wp = this.toWorld(px, py);
+    let best = null, bd = 1e9;
+    this.nodes.forEach(n => {
+      const d = Math.hypot(n.x - wp.x, n.y - wp.y);
+      if (d < n.r + 7 && d < bd) { bd = d; best = n; }
+    });
+    return best;
+  }
+  onKey(e) {
+    if (this.state.showEditor) return;
+    const tag = (e.target && e.target.tagName) || '';
+    if (tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT') return;
+    if (e.code === 'Space') { e.preventDefault(); this.togglePlay(); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); this.step(1); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); this.step(-1); }
+    else if (e.key === 'f') { this.userCam = false; }
+  }
+  togglePlay() {
+    if (!this.eng) return;
+    let t = this.simT;
+    if (!this.state.playing && t >= this.eng.duration - 1) { this.simT = 0; }
+    this.setState(s => ({ playing: !s.playing })); this._dirty = true;
+  }
+  step(dir) {
+    if (!this.eng) return;
+    const evs = this.eng.evs;
+    if (dir > 0) { const e = evs.find(e => e.t > this.simT + 1); this.simT = e ? e.t : this.eng.duration; }
+    else { let prev = 0; for (const e of evs) { if (e.t < this.simT - 1) prev = e.t; else break; } this.simT = prev; }
+    this._dirty = true;
+  }
+
+  // ── simulation frame ───────────────────────────────────
+  frame(ts) {
+    this._raf = requestAnimationFrame(t => this.frame(t));
+    const dt = Math.min(48, ts - (this._last || ts)); this._last = ts;
+    if (!this.eng || !this.cv) return;
+    if (this.state.playing && !this._scrub) {
+      this.simT = Math.min(this.eng.duration, this.simT + dt * this.state.speed);
+      if (this.simT >= this.eng.duration) this.setState({ playing: false });
+    }
+    this.syncNodes(); this.physics(dt); this.updateCam(); this.draw(); this.drawTL();
+  }
+  syncNodes() {
+    const t = this.simT;
+    this.eng.agents.forEach(a => {
+      const alive = t >= a.spawnT;
+      let n = this.nodes.get(a.id);
+      if (alive && !n) {
+        const p = a.parent && this.nodes.get(a.parent);
+        const idx = a.parent ? this.eng.agents.get(a.parent).children.indexOf(a.id) : 0;
+        const ang = idx * 2.399963 + a.depth * 1.7 + (this.hash(a.id) % 628) / 100;
+        const sp = this.staticPos && this.staticPos.get(a.id);
+        const useStatic = (this.props.layout || 'organic') === 'fixed' && sp;
+        const sx = useStatic ? sp.x : (p ? p.x + Math.cos(ang) * 55 : 0);
+        const sy = useStatic ? sp.y : (p ? p.y + Math.sin(ang) * 55 : 0);
+        n = { id: a.id, a, x: sx, y: sy, vx: 0, vy: 0, r: this.radius(a) };
+        this.nodes.set(a.id, n);
+      } else if (!alive && n) this.nodes.delete(a.id);
+    });
+  }
+  computeStatic() {
+    const ag = this.eng.agents, pos = new Map(), leaves = {};
+    const count = id => { const ks = ag.get(id).children; if (!ks.length) return (leaves[id] = 1); let s = 0; ks.forEach(k => s += count(k)); return (leaves[id] = s); };
+    const roots = this.eng.order.filter(id => !ag.get(id).parent);
+    let total = 0; roots.forEach(r => total += count(r));
+    const ring = [0, 165, 300, 405, 495, 570];
+    const rad = d => d < ring.length ? ring[d] : 570 + (d - 5) * 75;
+    const assign = (id, a0, a1) => {
+      const a = ag.get(id), mid = (a0 + a1) / 2;
+      pos.set(id, { x: Math.cos(mid) * rad(a.depth), y: Math.sin(mid) * rad(a.depth) });
+      let cur = a0; a.children.forEach(k => { const span = (a1 - a0) * (leaves[k] / leaves[id]); assign(k, cur, cur + span); cur += span; });
+    };
+    let cur = -Math.PI / 2;
+    roots.forEach(r => { const span = Math.PI * 2 * ((leaves[r] || 1) / (total || 1)); assign(r, cur, cur + span); cur += span; });
+    this.staticPos = pos;
+  }
+  radialLayout() {
+    const alive = this.nodes, ag = this.eng.agents;
+    const kids = id => ag.get(id).children.filter(c => alive.has(c));
+    const leaves = {};
+    const count = id => { const ks = kids(id); if (!ks.length) return (leaves[id] = 1); let s = 0; ks.forEach(k => s += count(k)); return (leaves[id] = s); };
+    const roots = [...alive.keys()].filter(id => { const a = ag.get(id); return !a.parent || !alive.has(a.parent); });
+    let total = 0; roots.forEach(r => total += count(r));
+    const ring = [0, 165, 300, 405, 495, 570];
+    const rad = d => d < ring.length ? ring[d] : 570 + (d - 5) * 75;
+    const assign = (id, a0, a1) => {
+      const a = ag.get(id), n = alive.get(id), mid = (a0 + a1) / 2;
+      if (n) { n.tx = Math.cos(mid) * rad(a.depth); n.ty = Math.sin(mid) * rad(a.depth); }
+      const ks = kids(id); let cur = a0;
+      ks.forEach(k => { const span = (a1 - a0) * (leaves[k] / leaves[id]); assign(k, cur, cur + span); cur += span; });
+    };
+    let cur = -Math.PI / 2;
+    roots.forEach(r => { const span = Math.PI * 2 * ((leaves[r] || 1) / (total || 1)); assign(r, cur, cur + span); cur += span; });
+  }
+  physics(dt) {
+    const ns = [...this.nodes.values()];
+    const st = Math.min(2, dt / 16);
+    if ((this.props.layout || 'organic') === 'fixed') {
+      ns.forEach(n => {
+        const t = this.staticPos && this.staticPos.get(n.id); if (!t) return;
+        n.vx += (t.x - n.x) * 0.12 * st; n.vy += (t.y - n.y) * 0.12 * st;
+        n.vx *= Math.pow(0.55, st); n.vy *= Math.pow(0.55, st);
+        if (Math.abs(t.x - n.x) < 0.3 && Math.abs(t.y - n.y) < 0.3) { n.x = t.x; n.y = t.y; n.vx = 0; n.vy = 0; }
+        else { n.x += n.vx * st; n.y += n.vy * st; }
+      });
+      return;
+    }
+    if ((this.props.layout || 'organic') === 'radial') {
+      this.radialLayout();
+      ns.forEach(n => {
+        if (n.tx != null) { n.vx += (n.tx - n.x) * 0.05 * st; n.vy += (n.ty - n.y) * 0.05 * st; }
+        n.vx *= Math.pow(0.7, st); n.vy *= Math.pow(0.7, st);
+        n.x += n.vx * st; n.y += n.vy * st;
+      });
+      return;
+    }
+    for (let i = 0; i < ns.length; i++) for (let j = i + 1; j < ns.length; j++) {
+      const A = ns[i], B = ns[j];
+      let dx = B.x - A.x, dy = B.y - A.y, d2 = dx * dx + dy * dy;
+      if (d2 < 1) { dx = ((this.hash(A.id) % 10) - 5) || 1; dy = ((this.hash(B.id) % 10) - 5) || 1; d2 = dx * dx + dy * dy; }
+      const d = Math.sqrt(d2);
+      const rep = (3200 * (A.r + B.r) / 42) / (d2 + 500);
+      const fx = dx / d * rep, fy = dy / d * rep;
+      A.vx -= fx * st; A.vy -= fy * st; B.vx += fx * st; B.vy += fy * st;
+    }
+    ns.forEach(n => {
+      const p = n.a.parent && this.nodes.get(n.a.parent);
+      const pd = this.powerDown(n.a, this.simT);
+      if (p && pd < 1) {
+        const kids = this.eng.agents.get(n.a.parent).children.length;
+        const rest = (n.a.depth === 1 ? 165 : 96) + kids * 4;
+        const dx = p.x - n.x, dy = p.y - n.y, d = Math.hypot(dx, dy) || 1;
+        const f = (d - rest) * 0.0055 * (1 - pd);
+        n.vx += dx / d * f * d * 0.02 * st + dx / d * f * st * 8;
+        n.vy += dy / d * f * d * 0.02 * st + dy / d * f * st * 8;
+        if (pd > 0) { n.vx -= dx / d * 0.4 * st; n.vy -= dy / d * 0.4 * st; } // drift away as it disconnects
+      } else if (!p) {
+        n.vx -= n.x * 0.0022 * st; n.vy -= n.y * 0.0022 * st;
+      }
+      n.vx *= Math.pow(0.87, st); n.vy *= Math.pow(0.87, st);
+      const sp = Math.hypot(n.vx, n.vy); if (sp > 7) { n.vx *= 7 / sp; n.vy *= 7 / sp; }
+      n.x += n.vx * st; n.y += n.vy * st;
+    });
+  }
+  updateCam() {
+    const w = this.cv.clientWidth, h = this.cv.clientHeight;
+    if (this.focusId) {
+      const n = this.nodes.get(this.focusId);
+      if (n) {
+        this.cam.x += (n.x - this.cam.x) * 0.09; this.cam.y += (n.y - this.cam.y) * 0.09;
+        if (Math.hypot(n.x - this.cam.x, n.y - this.cam.y) < 3) this.focusId = null;
+      } else this.focusId = null;
+      return;
+    }
+    if (this.userCam || !this.nodes.size) return;
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    this.nodes.forEach(n => { x0 = Math.min(x0, n.x - 70); y0 = Math.min(y0, n.y - 60); x1 = Math.max(x1, n.x + 70); y1 = Math.max(y1, n.y + 60); });
+    const px0 = this.state.railOpen ? 268 : 20, px1 = w - (this.state.selectedId ? 356 : 20);
+    const vw = Math.max(120, px1 - px0), vh = h - 70;
+    const ts = Math.min(1.35, Math.max(0.14, Math.min(vw / (x1 - x0), vh / (y1 - y0))));
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    const tx = cx - ((px0 + px1) / 2 - w / 2) / ts;
+    this.cam.s += (ts - this.cam.s) * 0.045;
+    this.cam.x += (tx - this.cam.x) * 0.05;
+    this.cam.y += (cy - this.cam.y) * 0.05;
+  }
+
+  // ── sprites ────────────────────────────────────────────
+  rgb(hex) { const n = parseInt(hex.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; }
+  glowSprite(color) {
+    const k = 'g' + color;
+    if (!this.sprites[k]) {
+      const c = document.createElement('canvas'); c.width = c.height = 96;
+      const x = c.getContext('2d'); const [r, g, b] = this.rgb(color);
+      const gr = x.createRadialGradient(48, 48, 2, 48, 48, 48);
+      gr.addColorStop(0, `rgba(${r},${g},${b},.55)`);
+      gr.addColorStop(0.35, `rgba(${r},${g},${b},.16)`);
+      gr.addColorStop(1, `rgba(${r},${g},${b},0)`);
+      x.fillStyle = gr; x.fillRect(0, 0, 96, 96);
+      this.sprites[k] = c;
+    }
+    return this.sprites[k];
+  }
+  orbSprite(color, r, dim) {
+    const rr = Math.max(4, Math.round(r));
+    const k = 'o' + color + '|' + rr + (dim ? 'd' : '');
+    if (!this.sprites[k]) {
+      const S = rr * 4; const c = document.createElement('canvas'); c.width = c.height = S;
+      const x = c.getContext('2d'); const [R, G, B] = this.rgb(color);
+      const mix = (t, w) => `rgba(${Math.round(R * (1 - w) + t * w)},${Math.round(G * (1 - w) + t * w)},${Math.round(B * (1 - w) + t * w)},1)`;
+      const gr = x.createRadialGradient(S / 2 - rr * 0.7, S / 2 - rr * 0.8, rr * 0.15, S / 2, S / 2, rr * 2);
+      gr.addColorStop(0, 'rgba(240,252,255,.98)');
+      gr.addColorStop(0.22, mix(255, 0.35));
+      gr.addColorStop(0.5, color);
+      gr.addColorStop(0.85, mix(0, 0.55));
+      gr.addColorStop(1, mix(0, 0.7));
+      x.fillStyle = gr; x.beginPath(); x.arc(S / 2, S / 2, rr * 2, 0, 7); x.fill();
+      x.strokeStyle = 'rgba(255,255,255,.25)'; x.lineWidth = 1;
+      x.beginPath(); x.arc(S / 2, S / 2, rr * 2 - 0.7, 0, 7); x.stroke();
+      if (dim) { x.globalCompositeOperation = 'saturation'; x.fillStyle = 'rgba(70,90,96,.75)'; x.beginPath(); x.arc(S / 2, S / 2, rr * 2, 0, 7); x.fill(); }
+      this.sprites[k] = c;
+    }
+    return this.sprites[k];
+  }
+
+  // ── drawing ────────────────────────────────────────────
+  curve(ax, ay, bx, by, seed) {
+    const mx = (ax + bx) / 2, my = (ay + by) / 2;
+    const dx = bx - ax, dy = by - ay, d = Math.hypot(dx, dy) || 1;
+    const sgn = (seed % 2) ? 1 : -1, k = 0.16 * sgn;
+    return { cx: mx - dy * k, cy: my + dx * k, d };
+  }
+  qPt(ax, ay, cx, cy, bx, by, t) {
+    const u = 1 - t;
+    return { x: u * u * ax + 2 * u * t * cx + t * t * bx, y: u * u * ay + 2 * u * t * cy + t * t * by };
+  }
+
+  draw() {
+    const cv = this.cv, x = this.ctx;
+    const dpr = window.devicePixelRatio || 1;
+    const w = cv.clientWidth, h = cv.clientHeight;
+    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+    x.setTransform(dpr, 0, 0, dpr, 0, 0);
+    x.clearRect(0, 0, w, h);
+    const T = this.simT, cam = this.cam, s = cam.s;
+    const glowK = Math.max(0, Number(this.props.glow != null ? this.props.glow : 1));
+    const beams = (this.props.edgeStyle || 'beams') === 'beams';
+    const pal = this.palette();
+
+    // dot grid
+    if (this.props.showGrid !== false) {
+      const gap = 36 * s;
+      if (gap > 9) {
+        x.fillStyle = pal.grid;
+        const ox = (w / 2 - cam.x * s) % gap, oy = (h / 2 - cam.y * s) % gap;
+        for (let gx = ox; gx < w; gx += gap) for (let gy = oy; gy < h; gy += gap) x.fillRect(gx, gy, 1, 1);
+      }
+    }
+
+    // recent activity
+    this._recent = {};
+    for (const e of this.eng.evs) {
+      if (e.t > T) break;
+      const age = T - e.t;
+      if (age < 1500) {
+        if (e.agent) this._recent[e.agent] = age;
+        if (e.to) this._recent[e.to] = age;
+        if (e.from) this._recent[e.from] = age;
+      }
+    }
+
+    x.save();
+    x.translate(w / 2, h / 2); x.scale(s, s); x.translate(-cam.x, -cam.y);
+
+    // edges
+    this.nodes.forEach(n => {
+      const a = n.a; if (!a.parent) return;
+      const p = this.nodes.get(a.parent); if (!p) return;
+      const pd = this.powerDown(a, T);
+      if (pd >= 1) return; // powered down → disconnected
+      const c = this.curve(p.x, p.y, n.x, n.y, this.hash(a.id));
+      const recent = this._recent[a.id] != null;
+      const pc = this.colorOf(this.eng.agents.get(a.parent)), nc = this.colorOf(a);
+      const [r1, g1, b1] = this.rgb(pc), [r2, g2, b2] = this.rgb(nc);
+      const fade = 1 - pd;
+      const end = 1 - pd * 0.97; // wire retracts toward parent as it severs
+      const base = (recent ? 0.5 : 0.2) * fade;
+      const gr = x.createLinearGradient(p.x, p.y, n.x, n.y);
+      gr.addColorStop(0, `rgba(${r1},${g1},${b1},${base})`);
+      gr.addColorStop(1, `rgba(${r2},${g2},${b2},${base})`);
+      const pathTo = frac => {
+        x.beginPath(); x.moveTo(p.x, p.y);
+        if (frac >= 0.999) { x.quadraticCurveTo(c.cx, c.cy, n.x, n.y); }
+        else { for (let k = 1; k <= 16; k++) { const q = this.qPt(p.x, p.y, c.cx, c.cy, n.x, n.y, (k / 16) * frac); x.lineTo(q.x, q.y); } }
+      };
+      if (beams) {
+        x.strokeStyle = `rgba(${r2},${g2},${b2},${(recent ? 0.1 : 0.045) * glowK * fade})`;
+        x.lineWidth = 6; pathTo(end); x.stroke();
+      }
+      x.strokeStyle = gr; x.lineWidth = 1.1;
+      pathTo(end); x.stroke();
+      if (pd > 0) { // spark at the retreating severed tip
+        const tip = this.qPt(p.x, p.y, c.cx, c.cy, n.x, n.y, end);
+        const sz = 11 * glowK * fade;
+        if (sz > 0.6) x.drawImage(this.glowSprite(nc), tip.x - sz / 2, tip.y - sz / 2, sz, sz);
+      }
+    });
+
+    // event effects (deterministic, scrub-safe)
+    for (const e of this.eng.evs) {
+      if (e.t > T) break;
+      const age = T - e.t;
+      if (e.type === 'spawn' && e.parent && age < 750) {
+        const n = this.nodes.get(e.agent), p = this.nodes.get(e.parent);
+        if (n && p) {
+          const pr = age / 750, c = this.curve(p.x, p.y, n.x, n.y, this.hash(e.agent));
+          const col = this.colorOf(n.a); const [R, G, B] = this.rgb(col);
+          x.strokeStyle = `rgba(${R},${G},${B},${(1 - pr) * 0.85})`; x.lineWidth = 2;
+          x.beginPath(); x.moveTo(p.x, p.y);
+          for (let k = 1; k <= 14; k++) { const q = this.qPt(p.x, p.y, c.cx, c.cy, n.x, n.y, (k / 14) * pr); x.lineTo(q.x, q.y); }
+          x.stroke();
+          const hd = this.qPt(p.x, p.y, c.cx, c.cy, n.x, n.y, pr);
+          x.drawImage(this.glowSprite(col), hd.x - 14, hd.y - 14, 28, 28);
+          x.strokeStyle = `rgba(${R},${G},${B},${(1 - pr) * 0.6})`; x.lineWidth = 1.4;
+          x.beginPath(); x.arc(n.x, n.y, n.r + 2 + pr * 22, 0, 7); x.stroke();
+        }
+      } else if (e.type === 'message' && e.from && e.to && age < 950) {
+        const f = this.nodes.get(e.from), t2 = this.nodes.get(e.to);
+        if (f && t2) {
+          const pr = Math.min(1, age / 900);
+          const c = this.curve(f.x, f.y, t2.x, t2.y, this.hash(e.from + e.to));
+          const col = this.colorOf(f.a); const [R, G, B] = this.rgb(col);
+          x.strokeStyle = `rgba(${R},${G},${B},.12)`; x.lineWidth = 1;
+          x.beginPath(); x.moveTo(f.x, f.y); x.quadraticCurveTo(c.cx, c.cy, t2.x, t2.y); x.stroke();
+          for (let k = 4; k >= 0; k--) {
+            const tt = pr - k * 0.045; if (tt < 0 || tt > 1) continue;
+            const q = this.qPt(f.x, f.y, c.cx, c.cy, t2.x, t2.y, tt);
+            const sz = (16 - k * 2.4) * glowK;
+            x.drawImage(this.glowSprite(col), q.x - sz / 2, q.y - sz / 2, sz, sz);
+            if (k === 0) { x.fillStyle = 'rgba(245,253,255,.95)'; x.beginPath(); x.arc(q.x, q.y, 1.8, 0, 7); x.fill(); }
+          }
+        }
+      } else if (e.type === 'message' && !e.from && e.to && age < 900) {
+        const n = this.nodes.get(e.to);
+        if (n) { const pr = age / 900; x.strokeStyle = `rgba(232,245,250,${(1 - pr) * 0.5})`; x.lineWidth = 1.3; x.beginPath(); x.arc(n.x, n.y, n.r + 3 + pr * 26, 0, 7); x.stroke(); }
+      } else if (e.type === 'tool' && age < 900) {
+        const n = this.nodes.get(e.agent);
+        if (n) { const pr = age / 900; x.strokeStyle = `rgba(243,196,126,${(1 - pr) * 0.4})`; x.lineWidth = 1.2; x.beginPath(); x.arc(n.x, n.y, n.r + 2 + pr * 13, 0, 7); x.stroke(); }
+      } else if (e.type === 'compact' && age < 900) {
+        const n = this.nodes.get(e.agent);
+        if (n) { const pr = age / 900; x.strokeStyle = `rgba(180,160,242,${(1 - pr) * 0.65})`; x.lineWidth = 1.6; x.beginPath(); x.arc(n.x, n.y, n.r + 4 + (1 - pr) * n.r * 2.4, 0, 7); x.stroke(); }
+      } else if (e.type === 'error' && age < 1300) {
+        const n = this.nodes.get(e.agent);
+        if (n) { const pr = age / 1300; x.strokeStyle = `rgba(255,122,112,${(1 - pr) * 0.7})`; x.lineWidth = 1.8; x.beginPath(); x.arc(n.x, n.y, n.r + 3 + pr * 30, 0, 7); x.stroke(); }
+      } else if (e.type === 'complete' && age < 650) {
+        const n = this.nodes.get(e.agent);
+        if (n) { const pr = age / 650; const sz = n.r * 6 * (1 - pr * 0.4); x.globalAlpha = (1 - pr); x.drawImage(this.glowSprite(this.colorOf(n.a)), n.x - sz / 2, n.y - sz / 2, sz, sz); x.globalAlpha = 1; }
+      }
+    }
+
+    // nodes
+    this.nodes.forEach(n => {
+      const a = n.a, col = this.colorOf(a);
+      const status = this.statusAt(a, T);
+      const tok = this.tokensAt(a, T), lim = a.def.limit || 200000, pct = Math.min(1, tok / lim);
+      const recent = this._recent[a.id] != null;
+      const dim = status === 'complete';
+      const pd = this.powerDown(a, T);
+      const breathe = status === 'active' ? 1 + 0.08 * Math.sin(T / 260 + this.hash(a.id)) : 1;
+      const halo = n.r * (4.6 + (recent ? 1.6 : 0)) * breathe * glowK * (dim ? 0.35 * (1 - pd) : 1);
+      if (halo > 1) x.drawImage(this.glowSprite(status === 'error' ? '#ff7a70' : col), n.x - halo / 2, n.y - halo / 2, halo, halo);
+      const os = this.orbSprite(status === 'error' ? '#ff7a70' : col, n.r, dim);
+      x.globalAlpha = dim ? 0.75 - pd * 0.4 : 1;
+      x.drawImage(os, n.x - n.r, n.y - n.r, n.r * 2, n.r * 2);
+      x.globalAlpha = 1;
+      if (pd > 0) { // powered-down dark core
+        x.fillStyle = `rgba(6,16,20,${pd * 0.66})`;
+        x.beginPath(); x.arc(n.x, n.y, n.r, 0, 7); x.fill();
+      }
+      // context ring
+      x.strokeStyle = 'rgba(200,230,240,.13)'; x.lineWidth = 1.6;
+      x.beginPath(); x.arc(n.x, n.y, n.r + 4.5, 0, 7); x.stroke();
+      if (pct > 0.003) {
+        const rc = this.ringColor(pct);
+        const flash = pct > 0.85 && status === 'active' ? 0.6 + 0.4 * Math.sin(T / 130) : 1;
+        x.strokeStyle = rc; x.globalAlpha = (dim ? 0.4 : 0.95) * flash; x.lineWidth = 2.4; x.lineCap = 'round';
+        x.beginPath(); x.arc(n.x, n.y, n.r + 4.5, -Math.PI / 2, -Math.PI / 2 + pct * Math.PI * 2); x.stroke();
+        x.globalAlpha = 1; x.lineCap = 'butt';
+      }
+      if (status === 'complete') {
+        const [cr, cg, cb] = this.rgb(col);
+        x.lineWidth = Math.max(1.6, n.r * 0.16); x.lineCap = 'round';
+        const drawCheck = () => { x.beginPath(); x.moveTo(n.x - n.r * 0.38, n.y + n.r * 0.02); x.lineTo(n.x - n.r * 0.1, n.y + n.r * 0.32); x.lineTo(n.x + n.r * 0.42, n.y - n.r * 0.28); x.stroke(); };
+        if (pd < 1) { x.strokeStyle = `rgba(10,25,30,${0.85 * (1 - pd)})`; drawCheck(); }
+        if (pd > 0) { x.strokeStyle = `rgba(${cr},${cg},${cb},${0.5 * pd})`; drawCheck(); }
+        x.lineCap = 'butt';
+      }
+      if (status === 'error') {
+        x.fillStyle = '#fff1ef'; x.font = `700 ${Math.max(9, n.r)}px 'JetBrains Mono',monospace`; x.textAlign = 'center'; x.textBaseline = 'middle';
+        x.fillText('!', n.x, n.y + 0.5);
+      }
+      if (this.state.selectedId === a.id) {
+        x.strokeStyle = 'rgba(235,250,255,.65)'; x.lineWidth = 1.2; x.setLineDash([4, 5]); x.lineDashOffset = -T / 40;
+        x.beginPath(); x.arc(n.x, n.y, n.r + 10, 0, 7); x.stroke(); x.setLineDash([]);
+      }
+    });
+    x.restore();
+
+    // labels + float text (screen space)
+    const total = this.nodes.size;
+    this.nodes.forEach(n => {
+      const a = n.a;
+      const sx = (n.x - cam.x) * s + w / 2, sy = (n.y - cam.y) * s + h / 2;
+      if (sx < -80 || sx > w + 80 || sy < -60 || sy > h + 60) return;
+      const sel = this.state.selectedId === a.id, hov = this.hoverId === a.id;
+      const show = a.depth <= 1 || sel || hov || total <= 20 || n.r * s > 12;
+      const status = this.statusAt(a, T);
+      if (show) {
+        const tok = this.tokensAt(a, T), lim = a.def.limit || 200000, pct = Math.min(1, tok / lim);
+        const fs = Math.max(8.5, Math.min(13, 11 * Math.sqrt(s)));
+        x.textAlign = 'center'; x.textBaseline = 'alphabetic';
+        x.font = `500 ${fs}px Outfit,sans-serif`;
+        x.fillStyle = status === 'complete' ? 'rgba(190,215,224,.5)' : 'rgba(224,242,248,.92)';
+        x.shadowColor = 'rgba(4,13,17,.9)'; x.shadowBlur = 4;
+        x.fillText(a.def.name, sx, sy - (n.r + 10) * s - 4);
+        if (a.depth <= 1 || sel || hov) {
+          x.font = `500 ${Math.max(7.5, fs * 0.78)}px 'JetBrains Mono',monospace`;
+          x.fillStyle = pct > 0.85 ? 'rgba(255,150,140,.9)' : 'rgba(150,200,215,.75)';
+          x.fillText(this.fmt(tok) + ' · ' + Math.round(pct * 100) + '%', sx, sy + (n.r + 9) * s + 11);
+        }
+        x.shadowBlur = 0;
+      }
+    });
+    // floating event labels
+    x.textAlign = 'center';
+    for (const e of this.eng.evs) {
+      if (e.t > T) break;
+      const age = T - e.t; if (age > 1700) continue;
+      const id = e.agent || e.to; const n = id && this.nodes.get(id); if (!n) continue;
+      const pr = age / 1700;
+      const sx = (n.x - cam.x) * s + w / 2, sy = (n.y - cam.y) * s + h / 2 - (n.r + 16) * s - 14 - pr * 16;
+      let txt = null, col = '#f3c47e';
+      if (e.type === 'tool') { txt = '⚙ ' + e.tool; }
+      else if (e.type === 'compact') { txt = '⇣ compact −' + this.fmt(e._drop || 0); col = '#b4a0f2'; }
+      else if (e.type === 'error') { txt = '✕ ' + (e.label || 'error'); col = '#ff7a70'; }
+      else if (e.type === 'retry') { txt = '↻ retry'; col = '#84e4c0'; }
+      if (!txt) continue;
+      x.globalAlpha = Math.min(1, (1 - pr) * 1.6);
+      x.font = `500 9.5px 'JetBrains Mono',monospace`;
+      x.shadowColor = 'rgba(4,13,17,.95)'; x.shadowBlur = 4;
+      x.fillStyle = col; x.fillText(txt, sx, sy);
+      x.shadowBlur = 0; x.globalAlpha = 1;
+    }
+
+    // vignette
+    const vg = x.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.38, w / 2, h / 2, Math.max(w, h) * 0.75);
+    vg.addColorStop(0, 'rgba(4,13,18,0)'); vg.addColorStop(1, pal.vign);
+    x.fillStyle = vg; x.fillRect(0, 0, w, h);
+  }
+
+  drawTL() {
+    const cv = this.tl; if (!cv || !this.eng) return;
+    const x = this.tctx, dpr = window.devicePixelRatio || 1;
+    const w = cv.clientWidth, h = cv.clientHeight;
+    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+    x.setTransform(dpr, 0, 0, dpr, 0, 0);
+    x.clearRect(0, 0, w, h);
+    const dur = this.eng.duration, y = h / 2;
+    x.fillStyle = 'rgba(150,210,230,.08)';
+    x.beginPath(); x.roundRect(1, y - 4, w - 2, 8, 4); x.fill();
+    // ticks
+    for (const e of this.eng.evs) {
+      const ex = 1 + (e.t / dur) * (w - 2);
+      x.fillStyle = this.TICK[e.type] || 'rgba(200,220,230,.4)';
+      x.globalAlpha = 0.75;
+      x.fillRect(ex, y - 8, 1.3, 16);
+    }
+    x.globalAlpha = 1;
+    // elapsed
+    const px = 1 + (this.simT / dur) * (w - 2);
+    const gr = x.createLinearGradient(0, 0, px, 0);
+    gr.addColorStop(0, 'rgba(43,111,133,.55)'); gr.addColorStop(1, 'rgba(122,220,242,.75)');
+    x.fillStyle = gr;
+    x.beginPath(); x.roundRect(1, y - 4, Math.max(4, px), 8, 4); x.fill();
+    // playhead
+    x.strokeStyle = 'rgba(234,247,251,.9)'; x.lineWidth = 1.4;
+    x.beginPath(); x.moveTo(px, 3); x.lineTo(px, h - 3); x.stroke();
+    x.fillStyle = '#eaf7fb'; x.shadowColor = '#7adcf2'; x.shadowBlur = 8;
+    x.beginPath(); x.arc(px, y, 3.4, 0, 7); x.fill(); x.shadowBlur = 0;
+  }
+
+  // ── formatting ─────────────────────────────────────────
+  fmt(n) { if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'; if (n >= 1000) return (n / 1000).toFixed(1) + 'k'; return String(Math.round(n)); }
+  fmtT(ms) { const t = ms / 1000; return Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0') + '.' + Math.floor((t % 1) * 10); }
+  statusMeta(st) {
+    return { pending: ['queued', 'rgba(150,200,215,.45)'], active: ['live', '#7adcf2'], error: ['error', '#ff7a70'], complete: ['done', 'rgba(132,228,192,.75)'] }[st];
+  }
+
+  // ── render values ──────────────────────────────────────
+  renderVals() {
+    const st = this.state, eng = this.eng;
+    if (!this._h) {
+      this._h = {
+        rootRef: el => { this.root = el; this.applyBg(); },
+        cvRef: el => this.bindCanvas(el),
+        tlRef: el => this.bindTL(el),
+        onScenario: e => { const v = +e.target.value; this.loadScenario(v); },
+        onPlay: () => this.togglePlay(),
+        onStepBack: () => this.step(-1),
+        onStepFwd: () => this.step(1),
+        onFit: () => { this.userCam = false; this.focusId = null; },
+        onRail: () => this.setState(s => ({ railOpen: !s.railOpen })),
+        onCloseSel: () => { this.setState({ selectedId: null }); this._dirty = true; },
+        onToggleEditor: () => {
+          const sc = this.eng ? this.eng.sc : {};
+          this.setState({ showEditor: true, editorError: '', editorText: JSON.stringify({ name: sc.name, desc: sc.desc, agents: sc.agents, events: sc.events }, null, 2) });
+        },
+        onCloseEditor: () => this.setState({ showEditor: false }),
+        onEditorChange: e => this.setState({ editorText: e.target.value }),
+        onApply: () => {
+          try {
+            const obj = JSON.parse(this.state.editorText);
+            if (!Array.isArray(obj.agents) || !Array.isArray(obj.events)) throw new Error('JSON needs "agents" and "events" arrays');
+            obj.name = obj.name || 'Custom workflow';
+            this.custom = obj;
+            this.loadScenario(-1);
+            this.setState({ showEditor: false, editorError: '' });
+          } catch (err) { this.setState({ editorError: String(err.message || err) }); }
+        },
+        onLoadFile: () => {
+          fetch('custom-workflow.json').then(r => { if (!r.ok) throw new Error('custom-workflow.json not found'); return r.json(); })
+            .then(j => this.setState({ editorText: JSON.stringify(j, null, 2), editorError: '' }))
+            .catch(e => this.setState({ editorError: String(e.message || e) }));
+        }
+      };
+    }
+    const H = this._h;
+    const base = {
+      ...H,
+      railOpen: st.railOpen, railClosed: !st.railOpen,
+      showEditor: st.showEditor, editorText: st.editorText, editorError: st.editorError,
+      playGlyph: st.playing ? '❚❚' : '▶',
+      scenarioValue: String(st.scenarioIndex),
+      scenarioOpts: [], scenarioDesc: '', agentRows: [], agentStats: '',
+      hasSel: false, timeLabel: '0:00.0 / 0:00.0',
+      speedOpts: [0.5, 1, 2, 4].map(v => {
+        if (!this._spdCb[v]) this._spdCb[v] = () => { this.setState({ speed: v }); this._dirty = true; };
+        const on = st.speed === v;
+        return { label: v + '×', onClick: this._spdCb[v], bg: on ? 'rgba(122,220,242,.18)' : 'transparent', color: on ? '#aee8f7' : 'rgba(160,205,220,.55)' };
+      })
+    };
+    if (!eng) return base;
+
+    base.scenarioOpts = this.workflows.map((s2, i) => ({ i: String(i), name: s2.name }));
+    if (this.custom) base.scenarioOpts.push({ i: '-1', name: this.custom.name + ' (custom)' });
+    base.scenarioDesc = eng.sc.desc || '';
+    base.timeLabel = this.fmtT(this.simT) + ' / ' + this.fmtT(eng.duration);
+
+    const T = this.simT;
+    let live = 0, done = 0;
+    base.agentRows = eng.order.map(id => {
+      const a = eng.agents.get(id);
+      const stt = this.statusAt(a, T);
+      if (stt === 'active' || stt === 'error') live++; if (stt === 'complete') done++;
+      const tok = this.tokensAt(a, T), lim = a.def.limit || 200000, pct = Math.min(1, tok / lim);
+      const [lbl, scol] = this.statusMeta(stt);
+      if (!this._rowCb[id]) this._rowCb[id] = () => { this.setState({ selectedId: id }); this.focusId = id; this._dirty = true; };
+      return {
+        name: a.def.name, color: this.colorOf(a), onClick: this._rowCb[id],
+        statusLabel: lbl, statusColor: scol,
+        alpha: stt === 'pending' ? 0.35 : stt === 'complete' ? 0.6 : 1,
+        bg: st.selectedId === id ? 'rgba(122,220,242,.09)' : 'transparent',
+        edge: st.selectedId === id ? '#7adcf2' : 'transparent',
+        pctStr: (pct * 100).toFixed(1) + '%', barColor: this.ringColor(pct),
+        tokStr: stt === 'pending' ? '—' : this.fmt(tok)
+      };
+    });
+    base.agentStats = live + ' live · ' + done + ' done · ' + eng.order.length + ' total';
+
+    const sel = st.selectedId && eng.agents.get(st.selectedId);
+    if (sel) {
+      const stt = this.statusAt(sel, T);
+      const tok = this.tokensAt(sel, T), lim = sel.def.limit || 200000, pct = Math.min(1, tok / lim);
+      const [lbl, scol] = this.statusMeta(stt);
+      base.hasSel = true;
+      base.selName = sel.def.name;
+      base.selColor = this.colorOf(sel);
+      base.selRole = ((sel.def.role || 'agent') + ' · ' + (sel.parent ? 'child of ' + eng.agents.get(sel.parent).def.name : 'root')).toUpperCase();
+      base.selStatus = lbl.toUpperCase(); base.selStatusColor = scol;
+      base.selTask = sel.def.task || '';
+      base.selTok = this.fmt(tok); base.selLimit = this.fmt(lim);
+      base.selPct = Math.round(pct * 100); base.selPctStr = (pct * 100).toFixed(1) + '%';
+      base.selBarColor = this.ringColor(pct);
+      const skills = {};
+      sel.evs.forEach(e => { if (e.type === 'tool' && e.t <= T) skills[e.tool] = (skills[e.tool] || 0) + 1; });
+      base.selSkills = Object.entries(skills).map(([name, count]) => ({ name, count }));
+      base.hasSkills = base.selSkills.length > 0;
+      base.selChildren = sel.children.map(cid => {
+        const c = eng.agents.get(cid);
+        const cst = this.statusAt(c, T);
+        const ctok = this.tokensAt(c, T), cpct = Math.min(1, ctok / (c.def.limit || 200000));
+        const [clbl, ccol] = this.statusMeta(cst);
+        if (!this._rowCb[cid]) this._rowCb[cid] = () => { this.setState({ selectedId: cid }); this.focusId = cid; this._dirty = true; };
+        return { name: c.def.name, color: this.colorOf(c), onClick: this._rowCb[cid], statusLabel: clbl, statusColor: ccol, pctStr: (cpct * 100).toFixed(0) + '%', barColor: this.ringColor(cpct) };
+      });
+      base.hasChildren = base.selChildren.length > 0;
+      const log = [];
+      for (const e of sel.evs) {
+        if (e.t > T) break;
+        const time = this.fmtT(e.t);
+        if (e.type === 'spawn') log.push({ time, tag: 'SPAWN', tagColor: '#72d6ee', text: sel.parent ? 'spawned by ' + eng.agents.get(sel.parent).def.name : 'session started', delta: '+' + this.fmt(e.tokens || 0) });
+        else if (e.type === 'message' && e.to === sel.id) log.push({ time, tag: '◀ RECV', tagColor: '#aee8f7', text: (e.label || 'message') + (e.from ? ' — from ' + (eng.agents.get(e.from) || { def: { name: e.from } }).def.name : ' — external'), delta: '+' + this.fmt(e.tokens || 0) });
+        else if (e.type === 'message' && e.from === sel.id) log.push({ time, tag: 'SEND ▶', tagColor: 'rgba(207,230,238,.8)', text: (e.label || 'message') + ' — to ' + (eng.agents.get(e.to) || { def: { name: e.to } }).def.name, delta: '' });
+        else if (e.type === 'tool') log.push({ time, tag: 'TOOL', tagColor: '#f3c47e', text: e.tool + (e.label ? ' — ' + e.label : ''), delta: '+' + this.fmt(e.tokens || 0) });
+        else if (e.type === 'compact') log.push({ time, tag: 'COMPACT', tagColor: '#b4a0f2', text: e.label || 'context compacted', delta: '−' + this.fmt(e._drop || 0) });
+        else if (e.type === 'error') log.push({ time, tag: 'ERROR', tagColor: '#ff7a70', text: e.label || 'error', delta: '' });
+        else if (e.type === 'retry') log.push({ time, tag: 'RETRY', tagColor: '#84e4c0', text: e.label || 'retrying', delta: '' });
+        else if (e.type === 'complete') log.push({ time, tag: 'DONE', tagColor: '#84e4c0', text: e.label || 'completed', delta: '' });
+      }
+      base.selLog = log.reverse().slice(0, 60);
+    }
+    return base;
+  }
+}
+
+</script>
+</body>
+</html>
