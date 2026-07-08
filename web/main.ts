@@ -248,7 +248,6 @@ function setActive(v: ViewSession) {
   } else if (livePinned && v.live) simT = v.eng.duration;
   renderer.setEngine(v.eng, oldId !== v.id);
   renderer.liveNow = v.live ? v.eng.duration : undefined;
-  renderPanels();
   updateChrome();
 }
 
@@ -263,7 +262,7 @@ function frame(ts: number) {
     }
     renderer.railOpen = !rail.classList.contains('closed');
     renderer.drawFrame(simT, dt);
-    if (panelsDirty && ts - panelsAt > 200) { panelsAt = ts; panelsDirty = false; renderPanels(); }
+    if ((panelsDirty || playing || (livePinned && active.live)) && ts - panelsAt > 200) { panelsAt = ts; panelsDirty = false; renderPanels(); }
   }
   updateChrome(false);
 }
