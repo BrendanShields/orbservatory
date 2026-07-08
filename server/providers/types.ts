@@ -1,4 +1,4 @@
-import type { AwvAgent, AwvEvent, AwvSession, SessionSource } from '../../shared/schema';
+import type { AwvAgent, AwvEvent, AwvSession, SearchPart, SessionSource, TokenTotals } from '../../shared/schema';
 import type { SessionState } from '../store';
 
 /** Minimal normalizer surface the store depends on; each provider supplies its own implementation. */
@@ -9,6 +9,17 @@ export interface SessionNormalizer {
   readonly projectName: string;
   setContextLimits(limits: Record<string, number>): AwvAgent[];
   snapshot(events: AwvEvent[]): AwvSession;
+
+  // Optional stats/search surface. Providers that expose it get token-accurate
+  // session stats and full-text search; the rest degrade to event-derived
+  // stats (marked partial) and title-only search until they implement it.
+  usageByModel?: ReadonlyMap<string, TokenTotals>;
+  skills?: Record<string, number>;
+  userTurns?: number;
+  lastActiveTs?: number;
+  parseFailures?: number;
+  searchParts?: SearchPart[];
+  getAgents?(): AwvAgent[];
 }
 
 export interface SessionProvider {

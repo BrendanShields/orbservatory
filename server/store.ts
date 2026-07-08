@@ -1,7 +1,8 @@
-import type { AwvAgent, AwvEvent, AwvSession, SessionSource, SessionSummary, ServerMessage } from '../shared/schema';
+import type { AwvAgent, AwvEvent, AwvSession, ModelPricing, SearchPart, SessionSource, SessionStats, SessionStatsBase, SessionSummary, ServerMessage, TierThresholds } from '../shared/schema';
 import { eventRank } from '../shared/order';
 import { TranscriptNormalizer } from './normalizer';
 import type { SessionNormalizer } from './providers/types';
+import { computeSessionStats, DEFAULT_TIER_THRESHOLDS, finalizeStats } from './stats';
 
 export interface SessionState {
   id: string;
@@ -21,6 +22,17 @@ export interface SessionState {
   agents: Map<string, AwvAgent>;
   events: AwvEvent[];
   files: Map<string, { offset: number; buffer: string; sourceKey: string }>;
+  /** Pricing-independent stats — recomputed from the live normalizer or restored from the disk cache. */
+  statsBase?: SessionStatsBase;
+  /** Loaded sessions have stale statsBase until the next flush. */
+  statsDirty?: boolean;
+  /** Search doc for sessions whose stats came from the cache/background parse (loaded sessions use the normalizer's). */
+  searchParts?: SearchPart[];
+  /** Source-file fingerprint statsBase was computed from (background full-parse path). */
+  statsFingerprint?: string;
+  /** Cheap `${mtime}:${size}` of the root file at last stats attempt — change re-queues. */
+  statsRootStamp?: string;
+  statsQueued?: boolean;
 }
 
 export interface Subscriber {
@@ -35,17 +47,34 @@ export class SessionStore {
   private subscribers = new Set<Subscriber>();
   private livenessMs: number;
   private contextLimits: Record<string, number>;
+  private pricing: Record<string, ModelPricing>;
+  private tierThresholds: TierThresholds;
   private lastSummariesDigest = '';
   private bootId?: string;
 
-  constructor(opts?: { livenessMs?: number; contextLimits?: Record<string, number>; bootId?: string }) {
+  constructor(opts?: { livenessMs?: number; contextLimits?: Record<string, number>; pricing?: Record<string, ModelPricing>; tierThresholds?: TierThresholds; bootId?: string }) {
     this.livenessMs = opts?.livenessMs ?? 5 * 60_000;
     this.contextLimits = opts?.contextLimits ?? {};
+    this.pricing = opts?.pricing ?? {};
+    this.tierThresholds = opts?.tierThresholds ?? DEFAULT_TIER_THRESHOLDS;
     this.bootId = opts?.bootId;
   }
 
   setLivenessMs(ms: number) {
     this.livenessMs = ms;
+  }
+
+  /** Pricing map / tier thresholds changed: re-finalize every known stats record and re-broadcast. */
+  setStatsConfig(pricing: Record<string, ModelPricing>, tierThresholds: TierThresholds) {
+    const changed = JSON.stringify(this.pricing) !== JSON.stringify(pricing)
+      || JSON.stringify(this.tierThresholds) !== JSON.stringify(tierThresholds);
+    this.pricing = pricing ?? {};
+    this.tierThresholds = tierThresholds ?? DEFAULT_TIER_THRESHOLDS;
+    if (changed) this.broadcastStats([...this.sessions.values()].filter((s) => s.statsBase));
+  }
+
+  getContextLimits(): Record<string, number> {
+    return this.contextLimits;
   }
 
   setContextLimits(limits: Record<string, number>) {
@@ -136,6 +165,7 @@ export class SessionStore {
       if (lastTs > 0) state.lastActive = Math.max(state.lastActive, lastTs);
       changed = true;
     }
+    if (changed) state.statsDirty = true;
     if (!state.loading && (events.length || agents.length)) {
       const from = Math.max(0, state.events.length - events.length);
       const upserts = agents.length ? agents : undefined;
@@ -150,6 +180,69 @@ export class SessionStore {
   finishLoad(state: SessionState) {
     state.loaded = true;
     state.loading = false;
+    state.statsDirty = true;
+  }
+
+  /** Stats + search doc computed off-thread of the live pipeline (cache hit or background full parse). */
+  setExternalStats(state: SessionState, base: SessionStatsBase, search: SearchPart[]) {
+    if (state.loaded) return; // live normalizer path is authoritative once loaded
+    state.statsBase = base;
+    state.searchParts = search;
+    state.statsDirty = false;
+    this.broadcastStats([state]);
+  }
+
+  statsOf(state: SessionState): SessionStats | null {
+    if (!state.statsBase) return null;
+    return finalizeStats(state.statsBase, { pricing: this.pricing, tierThresholds: this.tierThresholds });
+  }
+
+  allStats(): SessionStats[] {
+    this.flushDirtyStats(false);
+    const out: SessionStats[] = [];
+    for (const s of this.all()) {
+      const st = this.statsOf(s);
+      if (st) out.push(st);
+    }
+    return out;
+  }
+
+  /** Recompute stats for loaded sessions whose transcript advanced since the last flush. */
+  private flushDirtyStats(broadcast = true) {
+    const changed: SessionState[] = [];
+    for (const s of this.sessions.values()) {
+      if (!s.statsDirty || !s.loaded || s.loading) continue;
+      s.statsBase = computeSessionStats({ id: s.id, normalizer: s.normalizer, events: s.events });
+      s.statsDirty = false;
+      changed.push(s);
+    }
+    if (broadcast && changed.length) this.broadcastStats(changed);
+  }
+
+  private broadcastStats(states: SessionState[]) {
+    const stats = states.map((s) => this.statsOf(s)).filter((s): s is SessionStats => !!s);
+    if (!stats.length) return;
+    const msg: ServerMessage = { type: 'stats', stats };
+    for (const sub of this.subscribers) sub.send(msg);
+  }
+
+  /** Search docs (title + extracted text) for every session that has one. */
+  *searchDocs(): IterableIterator<[string, SearchPart[]]> {
+    for (const s of this.all()) {
+      const parts = s.loaded ? s.normalizer.searchParts : s.searchParts;
+      if (!parts || !parts.length) {
+        const title = s.normalizer.title;
+        if (title) yield [s.id, [{ f: 'title', s: title }]];
+        continue;
+      }
+      yield [s.id, [{ f: 'title', s: s.normalizer.title || s.sessionId }, ...parts]];
+    }
+  }
+
+  /** True when a session still lacks a search doc (background parse hasn't reached it). */
+  hasSearchDoc(state: SessionState): boolean {
+    const parts = state.loaded ? state.normalizer.searchParts : state.searchParts;
+    return !!parts;
   }
 
   snapshot(state: SessionState): AwvSession {
@@ -168,6 +261,8 @@ export class SessionStore {
   addSubscriber(sub: Subscriber) {
     this.subscribers.add(sub);
     sub.send({ type: 'sessions', sessions: this.summaries(), bootId: this.bootId });
+    const stats = this.allStats();
+    if (stats.length) sub.send({ type: 'stats', stats });
   }
 
   removeSubscriber(sub: Subscriber) {
@@ -180,6 +275,7 @@ export class SessionStore {
   }
 
   broadcastSessions() {
+    this.flushDirtyStats();
     const sessions = this.summaries();
     const digest = JSON.stringify(sessions);
     if (digest === this.lastSummariesDigest) return;

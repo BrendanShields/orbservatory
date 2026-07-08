@@ -2,11 +2,14 @@ import { watch, type FSWatcher } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import type { AwvEvent } from '../../shared/schema';
 import type { SessionStore, SessionState } from '../store';
 import type { SubagentMeta, TranscriptSource } from '../normalizer';
 import { TranscriptNormalizer } from '../normalizer';
 import type { SessionProvider } from './types';
 import { tailLines } from './tail';
+import { computeSessionStats } from '../stats';
+import { StatsCache, fingerprintOf, type FileStamp } from '../statsCache';
 
 interface WatchOptions {
   root?: string;
@@ -14,6 +17,9 @@ interface WatchOptions {
   livenessMs?: number;
   /** Disable fs.watch (tests drive scan() manually and rely on polling only). */
   watchFs?: boolean;
+  statsCache?: StatsCache;
+  /** Parallel background full-parses for historical stats (default 2). */
+  statsConcurrency?: number;
 }
 
 interface FileSource {
@@ -42,12 +48,18 @@ export class ClaudeProjectWatcher implements SessionProvider {
   // agent, so once we've read real fields we never re-read; until then (create
   // race) we retry each poll so a late-arriving meta still gets picked up.
   private metaCache = new Map<string, SubagentMeta>();
+  private statsCache: StatsCache | null;
+  private statsConcurrency: number;
+  private statsQueue: SessionState[] = [];
+  private statsActive = 0;
 
   constructor(private store: SessionStore, opts?: WatchOptions) {
     this.root = opts?.root || defaultClaudeRoot();
     this.pollMs = opts?.pollMs ?? 1500;
     this.livenessMs = opts?.livenessMs ?? 5 * 60_000;
     this.watchFs = opts?.watchFs ?? true;
+    this.statsCache = opts?.statsCache ?? null;
+    this.statsConcurrency = Math.max(1, opts?.statsConcurrency ?? 2);
   }
 
   start() {
@@ -62,6 +74,8 @@ export class ClaudeProjectWatcher implements SessionProvider {
     if (this.nudgeTimer) clearTimeout(this.nudgeTimer);
     for (const watcher of this.watchers.values()) watcher.close();
     this.watchers.clear();
+    for (const state of this.statsQueue) state.statsQueued = false;
+    this.statsQueue = [];
   }
 
   setLivenessMs(ms: number) {
@@ -119,10 +133,79 @@ export class ClaudeProjectWatcher implements SessionProvider {
           if (!state.peeked) await this.peekSession(state, st.size);
           if (state.loaded) this.releaseSessionWatches(state);
           state.live = false;
+          const rootStamp = `${Math.round(st.mtimeMs)}:${st.size}`;
+          if (this.statsCache && !state.loaded && !state.statsQueued && state.statsRootStamp !== rootStamp) {
+            state.statsQueued = true;
+            state.statsRootStamp = rootStamp;
+            this.statsQueue.push(state);
+          }
         }
       }
     }
     this.store.broadcastSessions();
+    this.pumpStats();
+  }
+
+  /** Drain the historical-stats queue with bounded parallelism; never blocks the live scan path. */
+  private pumpStats() {
+    while (this.statsActive < this.statsConcurrency && this.statsQueue.length) {
+      const state = this.statsQueue.shift()!;
+      this.statsActive++;
+      void this.computeHistoricalStats(state)
+        .catch((err) => console.error('[claude] stats parse failed', state.id, err))
+        .finally(() => {
+          state.statsQueued = false;
+          this.statsActive--;
+          this.pumpStats();
+        });
+    }
+  }
+
+  /**
+   * Full-parse a non-live session off the hot path: serve from the disk cache
+   * when the source fingerprint matches, otherwise parse with a throwaway
+   * normalizer and persist the result. The live path stays authoritative — if
+   * the session got loaded while we were queued, this is a no-op.
+   */
+  private async computeHistoricalStats(state: SessionState) {
+    if (!this.statsCache || state.loaded || state.loading) return;
+    const sources = await this.discoverSources(state, false);
+    const stamps: FileStamp[] = [];
+    for (const fs of sources) {
+      const st = await stat(fs.path).catch(() => null);
+      if (st) stamps.push({ path: fs.path, mtimeMs: st.mtimeMs, size: st.size });
+    }
+    const fingerprint = fingerprintOf(stamps);
+    if (state.statsFingerprint === fingerprint && state.statsBase) return;
+    const cached = await this.statsCache.get(state.id, fingerprint);
+    if (cached) {
+      state.statsFingerprint = fingerprint;
+      this.store.setExternalStats(state, cached.stats, cached.search);
+      return;
+    }
+    const normalizer = new TranscriptNormalizer({
+      sessionId: state.sessionId,
+      project: state.project,
+      cwd: state.cwd,
+      contextLimits: this.store.getContextLimits(),
+    });
+    const events: AwvEvent[] = [];
+    for (const fs of sources) {
+      const text = await readFile(fs.path, 'utf8').catch(() => '');
+      if (!text) continue;
+      const journal = fs.source.kind === 'workflow-journal';
+      for (const line of text.split(/\r?\n/)) {
+        if (!line.trim()) continue;
+        const batch = journal ? normalizer.ingestJournal(line, fs.source) : normalizer.normalizeLine(line, fs.source);
+        events.push(...batch.events);
+      }
+    }
+    if (state.loaded || state.loading) return; // live path took over mid-parse
+    const base = computeSessionStats({ id: state.id, normalizer, events });
+    const search = [...normalizer.searchParts];
+    state.statsFingerprint = fingerprint;
+    this.store.setExternalStats(state, base, search);
+    await this.statsCache.put(state.id, { fingerprint, stats: base, search });
   }
 
   private normalizerOf(state: SessionState): TranscriptNormalizer {
@@ -196,13 +279,13 @@ export class ClaudeProjectWatcher implements SessionProvider {
     }
   }
 
-  private async discoverSources(state: SessionState): Promise<FileSource[]> {
+  private async discoverSources(state: SessionState, addWatches = true): Promise<FileSource[]> {
     const sources: FileSource[] = [{
       path: state.rootFile,
       source: { sessionId: state.sessionId, project: state.project, cwd: state.cwd, filePath: state.rootFile, kind: 'root' },
     }];
     const subDir = join(state.sessionDir, 'subagents');
-    this.ensureWatch(subDir);
+    if (addWatches) this.ensureWatch(subDir);
     const subs = await safeReaddir(subDir, true);
     for (const ent of subs) {
       const p = join(subDir, ent.name);

@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { homedir, platform } from 'node:os';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import type { Settings } from '../shared/schema';
+import { DEFAULT_TIER_THRESHOLDS } from './stats';
 
 export const DEFAULT_SETTINGS: Settings = {
   palette: 'Deep Teal',
@@ -13,6 +14,8 @@ export const DEFAULT_SETTINGS: Settings = {
   pollMs: 1500,
   contextLimits: {},
   providers: {},
+  pricing: {},
+  tierThresholds: { ...DEFAULT_TIER_THRESHOLDS },
   port: 8787,
 };
 
@@ -72,6 +75,8 @@ function sanitize(s: Settings): Settings {
     pollMs: clampNum(s.pollMs, 250, 60_000, DEFAULT_SETTINGS.pollMs),
     contextLimits: s.contextLimits && typeof s.contextLimits === 'object' ? s.contextLimits : {},
     providers: sanitizeProviders(s.providers),
+    pricing: s.pricing && typeof s.pricing === 'object' ? s.pricing : {},
+    tierThresholds: sanitizeTiers(s.tierThresholds),
     port: clampNum(s.port, 1, 65_535, DEFAULT_SETTINGS.port),
   };
 }
@@ -83,6 +88,15 @@ function sanitizeProviders(v: unknown): Record<string, boolean> {
     if (typeof val === 'boolean') out[k] = val;
   }
   return out;
+}
+
+function sanitizeTiers(t: Settings['tierThresholds'] | undefined): Settings['tierThresholds'] {
+  if (!t || typeof t !== 'object') return { ...DEFAULT_TIER_THRESHOLDS };
+  return {
+    simpleMaxTools: clampNum(t.simpleMaxTools, 0, 10_000, DEFAULT_TIER_THRESHOLDS.simpleMaxTools),
+    complexMinSubagents: clampNum(t.complexMinSubagents, 1, 1_000, DEFAULT_TIER_THRESHOLDS.complexMinSubagents),
+    complexMinTools: clampNum(t.complexMinTools, 1, 100_000, DEFAULT_TIER_THRESHOLDS.complexMinTools),
+  };
 }
 
 function clampNum(v: any, lo: number, hi: number, fallback: number): number {
