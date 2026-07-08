@@ -22,4 +22,19 @@ html{color-scheme:dark}
 button,select,[tabindex]{outline:none}
 #tl:focus-visible{outline-offset:-2px;border-radius:6px}
 #tl{cursor:ew-resize}
+/* --- additions: press feedback, asymmetric easing, entrance/fade polish, edge fades, hit areas --- */
+button{transition:transform .06s ease}
+button:active{transform:scale(.97)}
+.rail{transition:transform .28s cubic-bezier(.22,1,.36,1),opacity .22s ease-out}
+.rail.closed{transition:transform .16s cubic-bezier(.4,0,1,1),opacity .14s ease-in}
+.rail-toggle{transition:opacity .18s ease,transform .06s ease}
+.rail:not(.closed)+.rail-toggle{display:block;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .18s ease,visibility 0s .18s}
+.modal{animation:awvFade .15s ease-out}
+@keyframes awvFade{from{opacity:0}}
+.agent-row{animation:rowIn .15s ease-out}
+@keyframes rowIn{from{opacity:0;transform:translateY(4px)}}
+.rail-body{mask-image:linear-gradient(to bottom,rgba(0,0,0,.35),#000 14px,#000 calc(100% - 14px),rgba(0,0,0,.35));-webkit-mask-image:linear-gradient(to bottom,rgba(0,0,0,.35),#000 14px,#000 calc(100% - 14px),rgba(0,0,0,.35))}
+.event-log{mask-image:linear-gradient(to bottom,rgba(0,0,0,.35),#000 12px,#000 calc(100% - 12px),rgba(0,0,0,.35));-webkit-mask-image:linear-gradient(to bottom,rgba(0,0,0,.35),#000 12px,#000 calc(100% - 12px),rgba(0,0,0,.35))}
+.rail-filter{position:relative}
+.close::after,.rail-filter::after,.rail-toggle::after{content:'';position:absolute;inset:-8px}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}}
