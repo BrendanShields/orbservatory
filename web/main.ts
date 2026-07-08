@@ -39,6 +39,7 @@ app.innerHTML = `
       <div id="time" class="time">0:00 / 0:00</div>
     </footer>
     <div id="settingsModal" class="modal" hidden role="dialog" aria-modal="true" aria-label="Settings"></div>
+    <div id="dropOverlay" class="drop-overlay" hidden><div>Drop AWV JSON to import</div></div>
   </div>`;
 
 const canvas = document.getElementById('canvas') as HTMLCanvasElement;
@@ -408,13 +409,27 @@ function step(dir: number) {
   updateChrome();
 }
 
+function importText(text: string, label: string) {
+  const obj = JSON.parse(text) as AwvSession;
+  if (!Array.isArray(obj.agents) || !Array.isArray(obj.events)) throw new Error('JSON needs agents and events arrays');
+  imported = { id: '__imported', awv: { name: obj.name || 'Imported replay', desc: obj.desc || label, agents: obj.agents, events: obj.events }, eng: parseSession(obj), live: false, lastIndex: obj.events.length, startMs: 0 };
+  livePinned = false; playing = true; renderPicker(); setActive(imported);
+}
+
 function importFile(file: File) {
-  file.text().then(text => {
-    const obj = JSON.parse(text) as AwvSession;
-    if (!Array.isArray(obj.agents) || !Array.isArray(obj.events)) throw new Error('JSON needs agents and events arrays');
-    imported = { id: '__imported', awv: { name: obj.name || 'Imported replay', desc: obj.desc || file.name, agents: obj.agents, events: obj.events }, eng: parseSession(obj), live: false, lastIndex: obj.events.length, startMs: 0 };
-    livePinned = false; playing = true; renderPicker(); setActive(imported);
-  }).catch(err => alert(String(err.message || err)));
+  file.text().then(text => importText(text, file.name)).catch(err => toast(`Import failed: ${err.message || err}`));
+}
+
+let toastTimer: number | null = null;
+function toast(msg: string) {
+  document.getElementById('toast')?.remove();
+  const el = document.createElement('div');
+  el.id = 'toast'; el.className = 'toast';
+  el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite');
+  el.textContent = msg;
+  document.querySelector('.stage')!.append(el);
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => { el.remove(); toastTimer = null; }, 4000);
 }
 
 function exportActive() {
@@ -435,5 +450,24 @@ window.addEventListener('keydown', e => {
   else if (e.key === 'c') { showCompleted = !showCompleted; renderPanels(); }
 });
 
+const dropOverlay = document.getElementById('dropOverlay')!;
+let dragDepth = 0;
+window.addEventListener('dragenter', e => {
+  if (!e.dataTransfer?.types?.includes('Files')) return;
+  dragDepth++;
+  dropOverlay.hidden = false;
+});
+window.addEventListener('dragleave', () => { if (dragDepth > 0 && --dragDepth === 0) dropOverlay.hidden = true; });
 window.addEventListener('dragover', e => { e.preventDefault(); });
-window.addEventListener('drop', e => { e.preventDefault(); const f = e.dataTransfer?.files?.[0]; if (f) importFile(f); });
+window.addEventListener('drop', e => {
+  e.preventDefault();
+  dragDepth = 0; dropOverlay.hidden = true;
+  const f = e.dataTransfer?.files?.[0]; if (f) importFile(f);
+});
+window.addEventListener('paste', e => {
+  const tag = (e.target as HTMLElement)?.tagName || '';
+  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+  const text = e.clipboardData?.getData('text/plain')?.trim();
+  if (!text || !(text.startsWith('{') || text.startsWith('['))) return;
+  try { importText(text, 'Pasted replay'); } catch (err) { toast(`Import failed: ${(err as Error).message || err}`); }
+});
