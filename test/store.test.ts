@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { SessionStore, type SessionState, type Subscriber } from '../server/store';
+import { TranscriptNormalizer } from '../server/normalizer';
 import type { AwvAgent, AwvEvent, ServerMessage } from '../shared/schema';
 
 function makeStore() {
@@ -73,9 +74,10 @@ test('agents merge into the snapshot', () => {
 test('setContextLimits live-updates loaded agents that have observed models', () => {
   const { store, state } = makeStore();
   const source = { sessionId: 's1', project: 'demo', filePath: '/tmp/s1.jsonl', kind: 'root' as const };
-  const user = state.normalizer.normalizeLine({ type: 'user', timestamp: '2026-07-06T00:00:00.000Z', message: { content: 'x' } }, source);
+  const norm = state.normalizer as TranscriptNormalizer;
+  const user = norm.normalizeLine({ type: 'user', timestamp: '2026-07-06T00:00:00.000Z', message: { content: 'x' } }, source);
   store.merge(state, user.agents, user.events);
-  const assistant = state.normalizer.normalizeLine({ type: 'assistant', timestamp: '2026-07-06T00:00:01.000Z', message: { model: 'claude-custom-model', usage: { input_tokens: 10 }, content: [] } }, source);
+  const assistant = norm.normalizeLine({ type: 'assistant', timestamp: '2026-07-06T00:00:01.000Z', message: { model: 'claude-custom-model', usage: { input_tokens: 10 }, content: [] } }, source);
   store.merge(state, assistant.agents, assistant.events);
   expect(store.snapshot(state).agents.find((a) => a.id === 'session:s1')?.limit).toBe(1_000_000);
 

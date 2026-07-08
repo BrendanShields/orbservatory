@@ -1,7 +1,12 @@
 import type { ServerWebSocket } from 'bun';
-import type { ClientMessage, ServerMessage, Settings } from '../shared/schema';
+import { existsSync } from 'node:fs';
+import type { ClientMessage, ServerMessage, SessionSource, Settings } from '../shared/schema';
 import { SessionStore, type SessionState, type Subscriber } from './store';
-import { ClaudeProjectWatcher } from './watch';
+import { ClaudeProjectWatcher } from './providers/claude';
+import { CodexProvider, defaultCodexRoot } from './providers/codex';
+import { OpencodeProvider, defaultOpencodeDataDir, findOpencodeDb } from './providers/opencode';
+import { CopilotProvider, defaultCopilotRoot } from './providers/copilot';
+import type { SessionProvider } from './providers/types';
 import { SettingsStore } from './settings';
 import { resolveConfig } from './config';
 import { resumeAction } from './resume';
@@ -12,14 +17,49 @@ await settings.load();
 const cfg = resolveConfig(settings.get());
 
 const store = new SessionStore({ livenessMs: cfg.livenessMs, contextLimits: cfg.contextLimits });
-const watcher = new ClaudeProjectWatcher(store, { root: cfg.root, pollMs: cfg.pollMs, livenessMs: cfg.livenessMs });
-watcher.start();
+
+const providerFactories: Record<SessionSource, () => SessionProvider | null> = {
+  claude: () => new ClaudeProjectWatcher(store, { root: cfg.root, pollMs: cfg.pollMs, livenessMs: cfg.livenessMs }),
+  codex: () => (existsSync(defaultCodexRoot()) ? new CodexProvider(store, { pollMs: cfg.pollMs, livenessMs: cfg.livenessMs }) : null),
+  opencode: () => (findOpencodeDb(defaultOpencodeDataDir()) ? new OpencodeProvider(store, { pollMs: cfg.pollMs, livenessMs: cfg.livenessMs }) : null),
+  copilot: () => (existsSync(defaultCopilotRoot()) ? new CopilotProvider(store, { pollMs: cfg.pollMs, livenessMs: cfg.livenessMs }) : null),
+};
+
+const providers = new Map<SessionSource, SessionProvider>();
+
+function syncProviders(s: Settings) {
+  for (const source of Object.keys(providerFactories) as SessionSource[]) {
+    const want = s.providers[source] !== false;
+    const running = providers.get(source);
+    if (want && !running) {
+      try {
+        const p = providerFactories[source]();
+        if (p) { p.start(); providers.set(source, p); }
+      } catch (err) {
+        console.error(`[${source}] provider failed to start; continuing without it`, err);
+      }
+    } else if (!want && running) {
+      running.stop();
+      providers.delete(source);
+    }
+  }
+}
 
 function applySettings(s: Settings) {
   store.setLivenessMs(s.livenessMs);
   store.setContextLimits(s.contextLimits);
-  watcher.setLivenessMs(s.livenessMs);
-  watcher.setPollMs(s.pollMs);
+  syncProviders(s);
+  for (const p of providers.values()) {
+    p.setLivenessMs(s.livenessMs);
+    p.setPollMs(s.pollMs);
+  }
+}
+
+syncProviders(settings.get());
+
+async function ensureLoaded(state: SessionState) {
+  const provider = providers.get(state.source);
+  if (provider) await provider.ensureLoaded(state);
 }
 
 const server = Bun.serve<{ sub?: WsSubscriber }>({
@@ -51,7 +91,7 @@ const server = Bun.serve<{ sub?: WsSubscriber }>({
       const id = decodeURIComponent(exp[1]);
       const s = store.get(id);
       if (!s) return json({ error: 'not found' }, 404);
-      await watcher.ensureLoaded(s);
+      await ensureLoaded(s);
       return json(store.snapshot(s));
     }
     return new Response('Not found', { status: 404 });
@@ -104,7 +144,7 @@ class WsSubscriber implements Subscriber {
     else { this.mode = 'ids'; this.ids = new Set(msg.sessionIds); }
     const states = this.store.all().filter(s => this.wants(s));
     for (const state of states) {
-      await watcher.ensureLoaded(state);
+      await ensureLoaded(state);
       const since = msg.lastEventIndex?.[state.id] ?? 0;
       const action = resumeAction(since, state.events.length);
       if (action.kind === 'noop') continue;

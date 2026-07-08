@@ -92,7 +92,7 @@ interface InspRefs { kicker: HTMLElement; kickerText: Text; h2: HTMLElement; pil
 interface InspState { key: string; refs: InspRefs | null; last: Record<string, string>; onSelect: (id: string) => void; onClose: () => void }
 const inspectors = new WeakMap<HTMLElement, InspState>();
 
-export function renderInspector(el: HTMLElement, eng: Engine | undefined, t: number, selectedId: string | null, liveNow: number | undefined, onSelect: (id: string) => void, onClose: () => void) {
+export function renderInspector(el: HTMLElement, eng: Engine | undefined, t: number, selectedId: string | null, liveNow: number | undefined, onSelect: (id: string) => void, onClose: () => void, sourceOf?: (agentId: string) => string | undefined) {
   let st = inspectors.get(el);
   if (!st) {
     const s: InspState = { key: '', refs: null, last: {}, onSelect, onClose };
@@ -136,7 +136,8 @@ export function renderInspector(el: HTMLElement, eng: Engine | undefined, t: num
   const setHtml = (k: string, node: HTMLElement, html: string) => { if (last[k] !== html) { last[k] = html; node.innerHTML = html; } };
   const status = statusAt(sel, t, liveNow), tok = tokensAt(sel, t), lim = sel.def.limit || 1000000, pct = Math.min(1, tok / lim), [lbl, scol] = statusMeta(status);
   const col = colorOf(sel);
-  const ktext = ((sel.def.role || 'agent') + ' · ' + (sel.parent ? 'child of ' + (eng.agents.get(sel.parent)?.def.name || sel.parent) : 'root')).toUpperCase();
+  const src = sourceOf?.(selectedId!);
+  const ktext = ((sel.def.role || 'agent') + ' · ' + (sel.parent ? 'child of ' + (eng.agents.get(sel.parent)?.def.name || sel.parent) : 'root') + (src ? ' · ' + src : '')).toUpperCase();
   const head = [ktext, sel.def.name, sel.def.task || '', col].join('|');
   if (last.head !== head) {
     last.head = head;

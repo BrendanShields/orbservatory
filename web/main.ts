@@ -1,4 +1,4 @@
-import type { AwvSession, ServerMessage, SessionSummary } from '../shared/schema';
+import type { AwvSession, ServerMessage, SessionSource, SessionSummary } from '../shared/schema';
 import { parseSession, fmtT } from './engine';
 import type { Engine } from './engine';
 import { VisualRenderer, PALETTES, type LayoutMode, type PaletteName } from './render';
@@ -15,6 +15,7 @@ app.innerHTML = `
     <header class="topbar">
       <div class="brand"><i></i><div><b>AGENT ORCHESTRA</b><span>CLAUDE CODE LIVE VISUALISER</span></div></div>
       <select id="sessionPicker" class="select" aria-label="Session"><option value="all-live">All live sessions</option></select>
+      <select id="sourceFilter" class="select compact" aria-label="Filter sessions by source"><option value="all">All sources</option><option value="claude">claude</option><option value="codex">codex</option><option value="opencode">opencode</option><option value="copilot">copilot</option></select>
       <div id="sessionDesc" class="desc">Connecting to local transcript stream…</div>
       <select id="layout" class="select compact" aria-label="Layout"><option>organic</option><option>radial</option><option>fixed</option></select>
       <select id="palette" class="select compact" aria-label="Colour palette">${Object.keys(PALETTES).map(p => `<option>${p}</option>`).join('')}</select>
@@ -51,6 +52,7 @@ reduceMotionMq.addEventListener('change', e => { renderer.reduceMotion = e.match
 const rail = document.getElementById('rail')!;
 const inspector = document.getElementById('inspector')!;
 const picker = document.getElementById('sessionPicker') as HTMLSelectElement;
+const sourceFilterEl = document.getElementById('sourceFilter') as HTMLSelectElement;
 const desc = document.getElementById('sessionDesc')!;
 const playBtn = document.getElementById('play')!;
 const liveBtn = document.getElementById('live')!;
@@ -61,6 +63,7 @@ const settingsModal = document.getElementById('settingsModal')!;
 let lastEmptyKey = '';
 
 let sessions: SessionSummary[] = [];
+let sourceFilter: SessionSource | 'all' = 'all';
 let choice: SessionChoice = 'all-live';
 let views = new Map<string, ViewSession>();
 let active: ViewSession | null = null;
@@ -175,8 +178,9 @@ function relTime(ms: number): string {
 
 function renderPicker() {
   const liveCount = sessions.filter(s => s.live).length;
+  const visible = sourceFilter === 'all' ? sessions : sessions.filter(s => s.source === sourceFilter);
   const groups = new Map<string, SessionSummary[]>();
-  for (const s of sessions) {
+  for (const s of visible) {
     const key = s.projectName || s.project;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key)!.push(s);
@@ -187,7 +191,7 @@ function renderPicker() {
   opts.push(`<option value="all-live">All live sessions (${liveCount})</option>`);
   for (const [projectName, list] of sorted) {
     list.sort((a, b) => b.lastActive - a.lastActive);
-    const rows = list.map(s => `<option value="${esc(s.id)}">${s.live ? '● ' : ''}${esc(s.title || s.id.slice(0, 8))} — ${relTime(s.lastActive)}</option>`);
+    const rows = list.map(s => `<option value="${esc(s.id)}">${s.live ? '● ' : ''}[${s.source}] ${esc(s.title || s.id.slice(0, 8))} — ${relTime(s.lastActive)}</option>`);
     opts.push(`<optgroup label="${esc(projectName)}">${rows.join('')}</optgroup>`);
   }
   picker.innerHTML = opts.join('');
@@ -203,7 +207,7 @@ function rebuildActive() {
     const minStart = Math.min(...liveViews.map(v => v.startMs));
     const awv: AwvSession = {
       name: 'All live sessions',
-      desc: `${liveViews.length} Claude Code session${liveViews.length === 1 ? '' : 's'} · mission control`,
+      desc: `${liveViews.length} agent session${liveViews.length === 1 ? '' : 's'} · mission control`,
       agents: [], events: [],
     };
     for (const v of liveViews) {
@@ -274,14 +278,23 @@ function renderPanels() {
   }, showCompleted, () => { showCompleted = !showCompleted; renderPanels(); });
   renderInspector(inspector, active?.eng, simT, selectedId, active?.live ? active.eng.duration : undefined, (id) => {
     selectedId = id; renderer.selectedId = id; renderer.focusId = id; renderPanels();
-  }, () => { selectedId = null; renderer.selectedId = null; renderPanels(); });
+  }, () => { selectedId = null; renderer.selectedId = null; renderPanels(); }, sourceOfAgent);
+}
+
+function sourceOfAgent(agentId: string): string | undefined {
+  if (!active) return undefined;
+  if (active.id === 'all-live') {
+    const sep = agentId.indexOf('::');
+    return sep > 0 ? summaryOf(agentId.slice(0, sep))?.source : undefined;
+  }
+  return summaryOf(active.id)?.source;
 }
 
 function updateChrome(render = true) {
   playBtn.textContent = playing ? '❚❚' : '▶';
   liveBtn.classList.toggle('off', !livePinned || !active?.live);
   timeEl.textContent = active ? `${fmtT(simT)} / ${fmtT(active.eng.duration)}` : '0:00 / 0:00';
-  desc.textContent = active?.awv.desc || (ws?.readyState === WebSocket.OPEN ? 'No live sessions yet — start Claude Code or import a replay.' : 'Connecting…');
+  desc.textContent = active?.awv.desc || (ws?.readyState === WebSocket.OPEN ? 'No live sessions yet — start an agent session or import a replay.' : 'Connecting…');
   updateEmptyState();
   if (render) renderPanels();
 }
@@ -296,7 +309,7 @@ function updateEmptyState() {
   if (!show) return;
   const head = connected ? 'No live sessions' : ws ? 'Connecting…' : 'Disconnected';
   const sub = connected
-    ? 'Start Claude Code in any project, pick a past session above, or import a replay.'
+    ? 'Start a coding agent (Claude Code, Codex, opencode, Copilot) in any project, pick a past session above, or import a replay.'
     : 'Reconnecting to the local transcript stream…';
   emptyEl.innerHTML = `<div class="empty-card"><span class="empty-dot ${connected ? 'on' : ''}"></span><h2>${head}</h2><p>${sub}</p>${connected ? `<button id="emptyImport" class="amber">Import a replay</button>` : ''}</div>`;
   const b = document.getElementById('emptyImport');
@@ -310,6 +323,7 @@ picker.onchange = () => {
   desc.textContent = 'Loading session…';
   subscribe();
 };
+sourceFilterEl.onchange = () => { sourceFilter = sourceFilterEl.value as SessionSource | 'all'; renderPicker(); };
 (document.getElementById('layout') as HTMLSelectElement).onchange = e => { renderer.layout = (e.target as HTMLSelectElement).value as LayoutMode; putSettings({ layout: renderer.layout }); };
 (document.getElementById('palette') as HTMLSelectElement).onchange = e => { renderer.palette = (e.target as HTMLSelectElement).value as PaletteName; putSettings({ palette: renderer.palette }); };
 
@@ -352,6 +366,7 @@ function renderSettingsModal() {
     <label class="set-row"><span>Liveness window (minutes)</span><input type="number" id="setLiveness" min="1" max="1440" step="1" value="${Math.round(s.livenessMs / 60000)}"></label>
     <label class="set-row"><span>Poll interval (ms)</span><input type="number" id="setPoll" min="250" max="60000" step="50" value="${s.pollMs}"></label>
     <label class="set-row"><span>Port <em>(restart to apply)</em></span><input type="number" id="setPort" min="1" max="65535" step="1" value="${s.port}"></label>
+    ${(['claude', 'codex', 'opencode', 'copilot'] as const).map(p => `<label class="set-row"><input type="checkbox" class="setProv" data-src="${p}" ${s.providers?.[p] !== false ? 'checked' : ''}><span>Ingest ${p} sessions</span></label>`).join('')}
     <label class="set-row col"><span>Per-model context limits (JSON)</span><input type="text" id="setLimits" spellcheck="false" value="${esc(limits)}" placeholder="{&quot;claude-haiku-4-5&quot;: 200000}"></label>
     <p class="set-err" id="setErr" role="alert" aria-live="polite" hidden></p>
     <div class="set-actions"><button class="ghost" id="settingsCancel">Cancel</button><button class="amber" id="settingsSave">Save</button></div>
@@ -385,8 +400,10 @@ function saveSettings() {
   if (!Number.isFinite(livenessMin) || livenessMin < 1) { err.textContent = 'Liveness must be at least 1 minute.'; err.hidden = false; return; }
   if (!Number.isFinite(pollMs) || pollMs < 250) { err.textContent = 'Poll interval must be at least 250 ms.'; err.hidden = false; return; }
   if (!Number.isFinite(port) || port < 1 || port > 65535) { err.textContent = 'Port must be between 1 and 65535.'; err.hidden = false; return; }
+  const providers: Record<string, boolean> = {};
+  settingsModal.querySelectorAll<HTMLInputElement>('.setProv').forEach(cb => { providers[cb.dataset.src!] = cb.checked; });
   // Server sanitises and re-broadcasts; the WS 'settings' message updates our UI.
-  putSettings({ showGrid: grid, livenessMs: Math.round(livenessMin * 60000), pollMs, port, contextLimits });
+  putSettings({ showGrid: grid, livenessMs: Math.round(livenessMin * 60000), pollMs, port, contextLimits, providers });
   closeSettings();
 }
 document.getElementById('fit')!.onclick = () => renderer.fit();

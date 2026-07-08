@@ -1,9 +1,11 @@
-import type { AwvAgent, AwvEvent, AwvSession, SessionSummary, ServerMessage } from '../shared/schema';
+import type { AwvAgent, AwvEvent, AwvSession, SessionSource, SessionSummary, ServerMessage } from '../shared/schema';
 import { eventRank } from '../shared/order';
 import { TranscriptNormalizer } from './normalizer';
+import type { SessionNormalizer } from './providers/types';
 
 export interface SessionState {
   id: string;
+  source: SessionSource;
   project: string;
   sessionId: string;
   rootFile: string;
@@ -15,7 +17,7 @@ export interface SessionState {
   peeked: boolean;
   live: boolean;
   processing?: Promise<void>;
-  normalizer: TranscriptNormalizer;
+  normalizer: SessionNormalizer;
   agents: Map<string, AwvAgent>;
   events: AwvEvent[];
   files: Map<string, { offset: number; buffer: string; sourceKey: string }>;
@@ -52,16 +54,22 @@ export class SessionStore {
     }
   }
 
-  upsertSession(meta: { id: string; project: string; sessionId: string; rootFile: string; sessionDir: string; cwd?: string; lastActive: number }): SessionState {
+  upsertSession(meta: { id: string; source?: SessionSource; project: string; sessionId: string; rootFile: string; sessionDir: string; cwd?: string; lastActive: number; makeNormalizer?: () => SessionNormalizer }): SessionState {
     let s = this.sessions.get(meta.id);
     if (!s) {
+      const { makeNormalizer, ...rest } = meta;
+      const normalizer = makeNormalizer
+        ? makeNormalizer()
+        : new TranscriptNormalizer({ sessionId: meta.sessionId, project: meta.project, cwd: meta.cwd, contextLimits: this.contextLimits });
+      if (makeNormalizer) normalizer.setContextLimits(this.contextLimits);
       s = {
-        ...meta,
+        ...rest,
+        source: meta.source ?? 'claude',
         loaded: false,
         loading: false,
         peeked: false,
         live: Date.now() - meta.lastActive < this.livenessMs,
-        normalizer: new TranscriptNormalizer({ sessionId: meta.sessionId, project: meta.project, cwd: meta.cwd, contextLimits: this.contextLimits }),
+        normalizer,
         agents: new Map(),
         events: [],
         files: new Map(),
@@ -92,6 +100,7 @@ export class SessionStore {
   summaries(): SessionSummary[] {
     return this.all().map((s) => ({
       id: s.id,
+      source: s.source,
       project: s.project,
       projectName: s.normalizer.projectName,
       title: s.normalizer.title || s.sessionId,
