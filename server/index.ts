@@ -73,6 +73,20 @@ async function ensureLoaded(state: SessionState) {
   if (provider) await provider.ensureLoaded(state);
 }
 
+// macOS SO_REUSEPORT can let two Bun processes silently share one port, which
+// splits requests across mismatched bundles (blank screen: HTML from one
+// process, chunk 404s from the other). Refuse to start if the port is taken.
+try {
+  const probeHost = cfg.host === '0.0.0.0' ? '127.0.0.1' : cfg.host;
+  const probe = await fetch(`http://${probeHost}:${cfg.port}/api/health`, { signal: AbortSignal.timeout(500) });
+  if (probe.ok) {
+    console.error(`claude-viz: another server is already listening on ${probeHost}:${cfg.port} — stop it or pass --port <n>.`);
+    process.exit(1);
+  }
+} catch {
+  // connection refused / timeout — port is free
+}
+
 const server = Bun.serve<{ sub?: WsSubscriber }>({
   port: cfg.port,
   hostname: cfg.host,
