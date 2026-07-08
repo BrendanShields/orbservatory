@@ -43,3 +43,5 @@ button:active{transform:scale(.97)}
 .toast{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);z-index:16;border:1px solid rgba(255,122,112,.35);background:rgba(30,10,10,.85);backdrop-filter:blur(8px);color:#ffb4ac;border-radius:10px;padding:9px 14px;font-family:'JetBrains Mono',monospace;font-size:10.5px;pointer-events:none;max-width:min(480px,calc(100% - 32px));animation:toastIn .18s ease-out}
 @keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(6px)}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}}
+.timeline{position:relative}
+.tl-tip{position:absolute;bottom:calc(100% - 2px);transform:translateX(-50%);background:rgba(8,20,26,.94);border:1px solid rgba(140,200,220,.24);border-radius:7px;padding:3px 9px;font-family:'JetBrains Mono',monospace;font-weight:500;color:#eaf7fb;white-space:nowrap;pointer-events:none;box-shadow:0 10px 34px rgba(0,0,0,.45);z-index:7}

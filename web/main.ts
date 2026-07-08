@@ -83,6 +83,7 @@ let panelsDirty = false;
 let panelsAt = 0;
 let showCompleted = false;
 let serverSettings: import('../shared/schema').Settings | null = null;
+let serverBootId: string | undefined;
 
 renderer.onSelect = (id) => { selectedId = id; renderer.selectedId = id; renderPanels(); };
 renderer.onSeek = (t) => { simT = t; livePinned = false; playing = false; panelsDirty = true; };
@@ -110,6 +111,7 @@ function summaryOf(id: string): SessionSummary | undefined {
 
 function handle(msg: ServerMessage) {
   if (msg.type === 'sessions') {
+    if (msg.bootId) serverBootId = msg.bootId;
     sessions = msg.sessions;
     renderPicker();
     // Only resubscribe when the set of live sessions actually changed (server broadcasts summaries on any activity).
@@ -129,13 +131,23 @@ function handle(msg: ServerMessage) {
   } else if (msg.type === 'events') {
     const v = views.get(msg.sessionId);
     if (!v) return;
+    const len = v.awv.events.length;
+    if (msg.from > len) {
+      // A batch was lost between server and us (drop/backpressure). Index
+      // arithmetic can no longer be trusted — refetch a full snapshot.
+      v.lastIndex = 0;
+      subscribe();
+      return;
+    }
     if (msg.agents?.length) {
       for (const a of msg.agents) {
         const i = v.awv.agents.findIndex(x => x.id === a.id);
         if (i >= 0) v.awv.agents[i] = a; else v.awv.agents.push(a);
       }
     }
-    if (msg.events.length) v.awv.events.push(...msg.events);
+    // Drop the already-applied overlap when a resume replays events we have.
+    const fresh = msg.events.slice(len - msg.from);
+    if (fresh.length) v.awv.events.push(...fresh);
     v.lastIndex = v.awv.events.length;
     dirty.add(msg.sessionId);
     scheduleRebuild();
@@ -165,7 +177,7 @@ function subscribe() {
   if (!ws || ws.readyState !== WebSocket.OPEN || imported) return;
   const lastEventIndex: Record<string, number> = {};
   for (const [id, v] of views) lastEventIndex[id] = v.lastIndex;
-  ws.send(JSON.stringify({ type: 'subscribe', sessionIds: choice === 'all-live' ? 'all-live' : [choice], lastEventIndex }));
+  ws.send(JSON.stringify({ type: 'subscribe', sessionIds: choice === 'all-live' ? 'all-live' : [choice], lastEventIndex, bootId: serverBootId }));
 }
 
 function relTime(ms: number): string {
@@ -262,7 +274,17 @@ function frame(ts: number) {
   if (active) {
     if (livePinned && active.live) simT = active.eng.duration;
     else if (playing) {
-      simT = Math.min(active.eng.duration, simT + dt * speed);
+      // Dead air auto-skips: a compressed idle gap crosses in ~600ms of wall time
+      // regardless of its real length, then playback resumes at the chosen speed.
+      let adv = dt * speed;
+      for (const g of active.eng.warp.gaps) {
+        if (g.t0 > simT) break;
+        if (simT < g.t1) {
+          adv = Math.min(Math.max(adv, (g.t1 - g.t0) * (dt / 600)), g.t1 - simT + dt * speed);
+          break;
+        }
+      }
+      simT = Math.min(active.eng.duration, simT + adv);
       if (simT >= active.eng.duration && !active.live) playing = false;
     }
     renderer.railOpen = !rail.classList.contains('closed');
@@ -332,6 +354,8 @@ function applyServerSettings(s: import('../shared/schema').Settings) {
   renderer.palette = s.palette as PaletteName;
   renderer.layout = s.layout as LayoutMode;
   renderer.showGrid = !!s.showGrid;
+  renderer.showSubagentNames = s.showSubagentNames !== false;
+  renderer.showOrchestratorName = s.showOrchestratorName !== false;
   const p = document.getElementById('palette') as HTMLSelectElement;
   const l = document.getElementById('layout') as HTMLSelectElement;
   if (p) p.value = s.palette;
@@ -363,6 +387,8 @@ function renderSettingsModal() {
     <button class="close" id="settingsClose" aria-label="Close settings" title="Close">×</button>
     <h2>Settings</h2>
     <label class="set-row"><input type="checkbox" id="setGrid" ${s.showGrid ? 'checked' : ''}><span>Show background grid</span></label>
+    <label class="set-row"><input type="checkbox" id="setSubNames" ${s.showSubagentNames !== false ? 'checked' : ''}><span>Show sub-agent names <em>(hover always shows)</em></span></label>
+    <label class="set-row"><input type="checkbox" id="setOrchName" ${s.showOrchestratorName !== false ? 'checked' : ''}><span>Show orchestrator name <em>(hover always shows)</em></span></label>
     <label class="set-row"><span>Liveness window (minutes)</span><input type="number" id="setLiveness" min="1" max="1440" step="1" value="${Math.round(s.livenessMs / 60000)}"></label>
     <label class="set-row"><span>Poll interval (ms)</span><input type="number" id="setPoll" min="250" max="60000" step="50" value="${s.pollMs}"></label>
     <label class="set-row"><span>Port <em>(restart to apply)</em></span><input type="number" id="setPort" min="1" max="65535" step="1" value="${s.port}"></label>
@@ -380,6 +406,8 @@ function saveSettings() {
   const err = settingsModal.querySelector<HTMLElement>('#setErr')!;
   err.hidden = true;
   const grid = settingsModal.querySelector<HTMLInputElement>('#setGrid')!.checked;
+  const subNames = settingsModal.querySelector<HTMLInputElement>('#setSubNames')!.checked;
+  const orchName = settingsModal.querySelector<HTMLInputElement>('#setOrchName')!.checked;
   const livenessMin = Number(settingsModal.querySelector<HTMLInputElement>('#setLiveness')!.value);
   const pollMs = Number(settingsModal.querySelector<HTMLInputElement>('#setPoll')!.value);
   const port = Number(settingsModal.querySelector<HTMLInputElement>('#setPort')!.value);
@@ -403,7 +431,7 @@ function saveSettings() {
   const providers: Record<string, boolean> = {};
   settingsModal.querySelectorAll<HTMLInputElement>('.setProv').forEach(cb => { providers[cb.dataset.src!] = cb.checked; });
   // Server sanitises and re-broadcasts; the WS 'settings' message updates our UI.
-  putSettings({ showGrid: grid, livenessMs: Math.round(livenessMin * 60000), pollMs, port, contextLimits, providers });
+  putSettings({ showGrid: grid, showSubagentNames: subNames, showOrchestratorName: orchName, livenessMs: Math.round(livenessMin * 60000), pollMs, port, contextLimits, providers });
   closeSettings();
 }
 document.getElementById('fit')!.onclick = () => renderer.fit();

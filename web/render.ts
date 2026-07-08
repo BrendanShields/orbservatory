@@ -1,5 +1,6 @@
 import type { Engine, EngineAgent } from './engine';
 import { colorOf, fmt, fmtT, hash, radius, ringColor, statusAt, tokensAt } from './engine';
+import type { AwvEvent } from '../shared/schema';
 
 export type LayoutMode = 'organic' | 'radial' | 'fixed';
 export type PaletteName = 'Deep Teal' | 'Obsidian' | 'Ink Blue' | 'Void Violet' | 'Carbon';
@@ -18,11 +19,16 @@ interface NodeState { id: string; a: EngineAgent; x: number; y: number; vx: numb
 const REMOVE_LINGER_MS = 3000;
 const REMOVE_FADE_MS = 800;
 
+const TICK_COLOR: Record<string, string> = { spawn: '#72d6ee', message: 'rgba(207,230,238,.55)', tool: '#f3c47e', compact: '#b4a0f2', error: '#ff7a70', retry: '#84e4c0', complete: '#84e4c0' };
+const LENS_R = 60;
+const LENS_MAG = 2.5;
+
 export class VisualRenderer {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   tl?: HTMLCanvasElement;
   tctx?: CanvasRenderingContext2D;
+  private tip: HTMLDivElement | null = null;
   eng?: Engine;
   nodes = new Map<string, NodeState>();
   staticPos = new Map<string, { x: number; y: number }>();
@@ -37,6 +43,8 @@ export class VisualRenderer {
   glow = 1;
   edgeStyle: 'beams' | 'wires' = 'beams';
   showGrid = false;
+  showSubagentNames = true;
+  showOrchestratorName = true;
   liveNow?: number;
   reduceMotion = false;
   sprites: Record<string, HTMLCanvasElement> = {};
@@ -44,6 +52,9 @@ export class VisualRenderer {
   private seekAt = 0;
   /** Timeline hover position as a fraction of duration (duration grows live). */
   private tlHover: number | null = null;
+  /** Pointer position over the timeline as a width fraction — drives the magnifier lens. */
+  private tlPointer: number | null = null;
+  private lensAmt = 0;
   private lastAriaT = -1e9;
   private down: { x: number; y: number; moved: number; node: NodeState | null; cx: number; cy: number; px: number; py: number; pt: number; pvx: number; pvy: number } | null = null;
   private scrub = false;
@@ -63,29 +74,37 @@ export class VisualRenderer {
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('timeline context unavailable');
     this.tctx = ctx;
+    this.tip = document.createElement('div');
+    this.tip.className = 'tl-tip';
+    this.tip.hidden = true;
+    canvas.parentElement?.append(this.tip);
+    const frac = (e: PointerEvent) => {
+      const r = canvas.getBoundingClientRect();
+      return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+    };
     const seek = (e: PointerEvent) => {
       if (!this.eng) return;
-      const r = canvas.getBoundingClientRect();
-      const p = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
-      this.onSeek?.(p * this.eng.duration);
+      const t = this.eng.warp.t(frac(e));
+      this.onSeek?.(this.nearestEvent(t, canvas.getBoundingClientRect().width)?.t ?? t);
     };
     canvas.setAttribute('aria-valuemin', '0');
-    canvas.addEventListener('pointerdown', e => { canvas.setPointerCapture(e.pointerId); this.scrub = true; this.tlHover = null; seek(e); });
+    canvas.addEventListener('pointerdown', e => { canvas.setPointerCapture(e.pointerId); this.scrub = true; this.tlHover = null; this.tlPointer = frac(e); seek(e); });
     canvas.addEventListener('pointermove', e => {
+      this.tlPointer = frac(e);
       if (this.scrub) { seek(e); return; }
-      const r = canvas.getBoundingClientRect();
-      this.tlHover = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+      this.tlHover = this.tlPointer;
     });
     canvas.addEventListener('pointerup', () => { this.scrub = false; });
-    canvas.addEventListener('pointerleave', () => { this.tlHover = null; });
+    canvas.addEventListener('pointerleave', () => { this.tlHover = null; this.tlPointer = null; if (this.tip) this.tip.hidden = true; });
     // Keyboard scrubbing: the timeline is exposed as role="slider" tabindex="0".
+    // Arrow steps move 2% of *visual* width so each press covers the same distance
+    // on screen whether the playhead sits in dense activity or a compressed gap.
     canvas.addEventListener('keydown', e => {
       if (!this.eng) return;
-      const dur = this.eng.duration, cur = Math.min(dur, Math.max(0, this.seekAt));
-      const stepMs = Math.max(1000, dur * 0.02);
+      const dur = this.eng.duration, warp = this.eng.warp, cur = Math.min(dur, Math.max(0, this.seekAt));
       let next: number | null = null;
-      if (e.key === 'ArrowRight') next = cur + stepMs;
-      else if (e.key === 'ArrowLeft') next = cur - stepMs;
+      if (e.key === 'ArrowRight') next = warp.t(warp.x(cur) + 0.02);
+      else if (e.key === 'ArrowLeft') next = warp.t(warp.x(cur) - 0.02);
       else if (e.key === 'Home') next = 0;
       else if (e.key === 'End') next = dur;
       if (next == null) return;
@@ -440,10 +459,15 @@ export class VisualRenderer {
     for (const n of this.nodes.values()) {
       const a=n.a; if(this.goneFrac(a,T)>0)continue;
       const sx=(n.x-cam.x)*s+w/2, sy=(n.y-cam.y)*s+h/2; if(sx<-90||sx>w+90||sy<-70||sy>h+70)continue;
-      const sel=this.selectedId===a.id, hov=this.hoverId===a.id, show=a.depth<=1||sel||hov||total<=20||n.r*s>12, status=statusAt(a,T,this.liveNow);
-      if(!show)continue; const tok=tokensAt(a,T), lim=a.def.limit||1000000, pct=Math.min(1,tok/lim), fs=Math.max(8.5,Math.min(13,11*Math.sqrt(s)));
-      x.textAlign='center'; x.textBaseline='alphabetic'; x.font=`500 ${fs}px Outfit,sans-serif`; x.fillStyle=status==='complete'||status==='idle'?'rgba(190,215,224,.5)':'rgba(224,242,248,.92)'; x.shadowColor='rgba(4,13,17,.9)'; x.shadowBlur=4; x.fillText(a.def.name,sx,sy-(n.r+10)*s-4);
-      if(a.depth<=1||sel||hov){x.font=`500 ${Math.max(7.5,fs*.78)}px 'JetBrains Mono',monospace`; x.fillStyle=pct>.85?'rgba(255,150,140,.9)':'rgba(150,200,215,.75)'; x.fillText(`${fmt(tok)} · ${Math.round(pct*100)}%`,sx,sy+(n.r+9)*s+11);} x.shadowBlur=0;
+      const sel=this.selectedId===a.id, hov=this.hoverId===a.id;
+      const nameOn=a.depth===0?this.showOrchestratorName:this.showSubagentNames;
+      const dense=a.depth<=1||total<=20||n.r*s>12;
+      const showName=(nameOn&&dense)||sel||hov, showTok=a.depth<=1||sel||hov;
+      if(!showName&&!showTok)continue;
+      const status=statusAt(a,T,this.liveNow), tok=tokensAt(a,T), lim=a.def.limit||1000000, pct=Math.min(1,tok/lim), fs=Math.max(8.5,Math.min(13,11*Math.sqrt(s)));
+      x.textAlign='center'; x.textBaseline='alphabetic'; x.shadowColor='rgba(4,13,17,.9)'; x.shadowBlur=4;
+      if(showName){x.font=`500 ${fs}px Outfit,sans-serif`; x.fillStyle=status==='complete'||status==='idle'?'rgba(190,215,224,.5)':'rgba(224,242,248,.92)'; x.fillText(a.def.name,sx,sy-(n.r+10)*s-4);}
+      if(showTok){x.font=`500 ${Math.max(7.5,fs*.78)}px 'JetBrains Mono',monospace`; x.fillStyle=pct>.85?'rgba(255,150,140,.9)':'rgba(150,200,215,.75)'; x.fillText(`${fmt(tok)} · ${Math.round(pct*100)}%`,sx,sy+(n.r+9)*s+11);} x.shadowBlur=0;
     }
     x.textAlign='center';
     const evs=this.eng.evs;
@@ -453,7 +477,7 @@ export class VisualRenderer {
   private tlCache: { canvas: HTMLCanvasElement; key: string } | null = null;
 
   drawTL(t: number) {
-    const cv=this.tl, x=this.tctx, eng=this.eng; if(!cv||!x||!eng)return; const dpr=devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight; if(cv.width!==Math.round(w*dpr)||cv.height!==Math.round(h*dpr)){cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr);} x.setTransform(dpr,0,0,dpr,0,0); x.clearRect(0,0,w,h); const dur=eng.duration,y=h/2;
+    const cv=this.tl, x=this.tctx, eng=this.eng; if(!cv||!x||!eng)return; const dpr=devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight; if(cv.width!==Math.round(w*dpr)||cv.height!==Math.round(h*dpr)){cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr);} x.setTransform(dpr,0,0,dpr,0,0); x.clearRect(0,0,w,h); const dur=eng.duration,warp=eng.warp,y=h/2;
     // Event ticks are static per engine state — render once to an offscreen layer, blit per frame.
     const key = `${eng.evs.length}|${dur}|${w}|${h}|${dpr}`;
     if (!this.tlCache || this.tlCache.key !== key) {
@@ -461,25 +485,117 @@ export class VisualRenderer {
       const ox = off.getContext('2d')!; ox.setTransform(dpr,0,0,dpr,0,0);
       ox.fillStyle='rgba(150,210,230,.08)'; ox.beginPath(); ox.roundRect(1,y-4,w-2,8,4); ox.fill();
       ox.globalAlpha=.75;
-      for(const e of eng.evs){const ex=1+(e.t/dur)*(w-2); ox.fillStyle=({spawn:'#72d6ee',message:'rgba(207,230,238,.55)',tool:'#f3c47e',compact:'#b4a0f2',error:'#ff7a70',retry:'#84e4c0',complete:'#84e4c0'} as any)[e.type]||'rgba(200,220,230,.4)'; ox.fillRect(ex,y-8,1.3,16);}
+      for(const e of eng.evs){const ex=1+warp.x(e.t)*(w-2); ox.fillStyle=TICK_COLOR[e.type]||'rgba(200,220,230,.4)'; ox.fillRect(ex,y-8,1.3,16);}
       ox.globalAlpha=1;
       this.tlCache = { canvas: off, key };
       cv.setAttribute('aria-valuemax', String(Math.round(dur / 1000)));
     }
     x.drawImage(this.tlCache.canvas, 0, 0, w, h);
-    const px=1+(Math.min(dur,Math.max(0,t))/dur)*(w-2), gr=x.createLinearGradient(0,0,px,0); gr.addColorStop(0,'rgba(43,111,133,.55)'); gr.addColorStop(1,'rgba(122,220,242,.75)'); x.fillStyle=gr; x.globalAlpha=.85; x.beginPath(); x.roundRect(1,y-4,Math.max(4,px),8,4); x.fill(); x.globalAlpha=1; x.strokeStyle='rgba(234,247,251,.9)'; x.lineWidth=1.4; x.beginPath(); x.moveTo(px,3); x.lineTo(px,h-3); x.stroke(); x.fillStyle='#eaf7fb'; x.shadowColor='#7adcf2'; x.shadowBlur=8; x.beginPath(); x.arc(px,y,3.4,0,7); x.fill(); x.shadowBlur=0;
+    const lens = this.lensFn(w);
+    const px = (lens?.map ?? (p => p))(1 + warp.x(Math.min(dur, Math.max(0, t))) * (w - 2));
+    const gr=x.createLinearGradient(0,0,px,0); gr.addColorStop(0,'rgba(43,111,133,.55)'); gr.addColorStop(1,'rgba(122,220,242,.75)'); x.fillStyle=gr; x.globalAlpha=.85; x.beginPath(); x.roundRect(1,y-4,Math.max(4,px),8,4); x.fill(); x.globalAlpha=1;
+    if (lens) this.drawLens(x, w, y, lens, px, gr);
+    this.drawTLGaps(x, w, y, lens?.map);
+    x.strokeStyle='rgba(234,247,251,.9)'; x.lineWidth=1.4; x.beginPath(); x.moveTo(px,3); x.lineTo(px,h-3); x.stroke(); x.fillStyle='#eaf7fb'; x.shadowColor='#7adcf2'; x.shadowBlur=8; x.beginPath(); x.arc(px,y,3.4,0,7); x.fill(); x.shadowBlur=0;
     if (this.tlHover != null && !this.scrub) {
-      const hx = 1 + this.tlHover * (w - 2);
+      const rawT = warp.t(this.tlHover);
+      const ev = this.nearestEvent(rawT, w - 2);
+      const ht = ev ? ev.t : rawT;
+      const hx = (lens?.map ?? (p => p))(1 + warp.x(ht) * (w - 2));
       x.strokeStyle = 'rgba(234,247,251,.3)'; x.lineWidth = 1; x.beginPath(); x.moveTo(hx, 3); x.lineTo(hx, h - 3); x.stroke();
-      x.font = `500 8.5px 'JetBrains Mono',monospace`; x.fillStyle = 'rgba(234,247,251,.75)';
-      x.textAlign = hx < 40 ? 'left' : hx > w - 40 ? 'right' : 'center'; x.textBaseline = 'top';
-      x.fillText(fmtT(this.tlHover * dur), hx, 1);
-    }
+      let label = fmtT(ht);
+      if (ev) label += ` · ${ev.type === 'tool' ? ev.tool : ev.type}`;
+      else { const g = warp.gaps.find(g => rawT >= g.t0 && rawT < g.t1); if (g) label += ` · ${fmtT(g.t1 - g.t0)} idle`; }
+      if (this.tip) {
+        this.tip.textContent = label;
+        this.tip.style.fontSize = `${(10 + 3.5 * this.lensAmt).toFixed(2)}px`;
+        this.tip.hidden = false;
+        const half = this.tip.offsetWidth / 2;
+        const fw = cv.parentElement?.clientWidth ?? w;
+        this.tip.style.left = `${Math.min(fw - half - 4, Math.max(half + 4, cv.offsetLeft + hx))}px`;
+      }
+    } else if (this.tip) this.tip.hidden = true;
     if (Math.abs(t - this.lastAriaT) >= 1000) {
       this.lastAriaT = t;
       cv.setAttribute('aria-valuenow', String(Math.round(Math.min(dur, Math.max(0, t)) / 1000)));
       cv.setAttribute('aria-valuetext', fmtT(t));
     }
+  }
+
+  /**
+   * Dock-style fisheye around the pointer: identity outside LENS_R, zero displacement
+   * at the cursor itself so pointer position and seek target always agree.
+   */
+  private lensFn(w: number): { cx: number; map: (p: number) => number } | null {
+    if (this.tlPointer == null || this.reduceMotion) { this.lensAmt = 0; return null; }
+    this.lensAmt += (1 - this.lensAmt) * 0.25;
+    const m = 1 + (LENS_MAG - 1) * this.lensAmt;
+    const cx = 1 + this.tlPointer * (w - 2);
+    const map = (p: number) => {
+      const a = Math.abs(p - cx) / LENS_R;
+      if (a >= 1) return p;
+      return cx + (p - cx) * (1 + (m - 1) * (1 - a) * (1 - a));
+    };
+    return { cx, map };
+  }
+
+  /** Re-render the tick strip under the lens: magnified spacing and tick height near the cursor. */
+  private drawLens(x: CanvasRenderingContext2D, w: number, y: number, lens: { cx: number; map: (p: number) => number }, px: number, gr: CanvasGradient) {
+    const eng = this.eng!, warp = eng.warp, evs = eng.evs;
+    const x0 = Math.max(1, lens.cx - LENS_R), x1 = Math.min(w - 1, lens.cx + LENS_R);
+    if (x1 - x0 < 4) return;
+    x.save();
+    x.beginPath(); x.rect(x0, y - 13, x1 - x0, 26); x.clip();
+    x.clearRect(x0, y - 13, x1 - x0, 26);
+    x.fillStyle = 'rgba(150,210,230,.08)'; x.fillRect(x0, y - 4, x1 - x0, 8);
+    const tA = warp.t((x0 - 1) / (w - 2)), tB = warp.t((x1 - 1) / (w - 2));
+    x.globalAlpha = .75;
+    for (let i = this.evLowerBound(tA); i < evs.length; i++) {
+      const e = evs[i];
+      if (e.t > tB) break;
+      const bp = 1 + warp.x(e.t) * (w - 2);
+      const d = Math.min(1, Math.abs(bp - lens.cx) / LENS_R);
+      const hh = 8 * (1 + 0.5 * this.lensAmt * (1 - d) * (1 - d));
+      x.fillStyle = TICK_COLOR[e.type] || 'rgba(200,220,230,.4)';
+      x.fillRect(lens.map(bp), y - hh, 1.3, hh * 2);
+    }
+    x.globalAlpha = 1;
+    if (px > x0) { x.fillStyle = gr; x.globalAlpha = .85; x.fillRect(x0, y - 4, Math.min(px, x1) - x0, 8); x.globalAlpha = 1; }
+    x.restore();
+  }
+
+  /** Hatched axis-break bands over compressed idle stretches, drawn above the progress fill. */
+  private drawTLGaps(x: CanvasRenderingContext2D, w: number, y: number, map?: (p: number) => number) {
+    const eng = this.eng!;
+    for (const g of eng.warp.gaps) {
+      let x0 = 1 + eng.warp.x(g.t0) * (w - 2), x1 = 1 + eng.warp.x(g.t1) * (w - 2);
+      if (map) { x0 = map(x0); x1 = map(x1); }
+      const bw = x1 - x0 - 2;
+      if (bw < 2) continue;
+      x.save();
+      x.beginPath(); x.rect(x0 + 1, y - 5, bw, 10); x.clip();
+      x.fillStyle = 'rgba(4,11,15,.78)'; x.fillRect(x0 + 1, y - 5, bw, 10);
+      x.strokeStyle = 'rgba(150,210,230,.16)'; x.lineWidth = 1;
+      x.beginPath();
+      for (let gx = x0 - 8; gx < x1 + 8; gx += 6) { x.moveTo(gx, y + 6); x.lineTo(gx + 8, y - 6); }
+      x.stroke();
+      x.restore();
+    }
+  }
+
+  /** Nearest event within `px` pixels of warped time t — pointer landings snap to data. */
+  private nearestEvent(t: number, width: number, px = 5): AwvEvent | null {
+    const eng = this.eng;
+    if (!eng || !eng.evs.length) return null;
+    const i = this.evLowerBound(t);
+    const xt = eng.warp.x(t) * width;
+    let best: AwvEvent | null = null, bd = px;
+    for (const e of [eng.evs[i - 1], eng.evs[i]]) {
+      if (!e) continue;
+      const d = Math.abs(eng.warp.x(e.t) * width - xt);
+      if (d < bd) { bd = d; best = e; }
+    }
+    return best;
   }
 
   private rgb(hex: string): [number, number, number] { if(!hex.startsWith('#')) return [114,214,238]; const n=parseInt(hex.slice(1),16); return [n>>16&255,n>>8&255,n&255]; }

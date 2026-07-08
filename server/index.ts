@@ -16,7 +16,11 @@ const settings = new SettingsStore();
 await settings.load();
 const cfg = resolveConfig(settings.get());
 
-const store = new SessionStore({ livenessMs: cfg.livenessMs, contextLimits: cfg.contextLimits });
+// Identifies this server process. Resume cursors (array indexes into the
+// append-ordered event log) are only valid within the boot that minted them.
+const BOOT_ID = crypto.randomUUID();
+
+const store = new SessionStore({ livenessMs: cfg.livenessMs, contextLimits: cfg.contextLimits, bootId: BOOT_ID });
 
 const providerFactories: Record<SessionSource, () => SessionProvider | null> = {
   claude: () => new ClaudeProjectWatcher(store, { root: cfg.root, pollMs: cfg.pollMs, livenessMs: cfg.livenessMs }),
@@ -142,14 +146,17 @@ class WsSubscriber implements Subscriber {
     if (msg.type !== 'subscribe') return;
     if (msg.sessionIds === 'all-live') { this.mode = 'all-live'; this.ids.clear(); }
     else { this.mode = 'ids'; this.ids = new Set(msg.sessionIds); }
+    const sameBoot = msg.bootId === BOOT_ID;
     const states = this.store.all().filter(s => this.wants(s));
     for (const state of states) {
       await ensureLoaded(state);
       const since = msg.lastEventIndex?.[state.id] ?? 0;
-      const action = resumeAction(since, state.events.length);
+      const action = resumeAction(since, state.events.length, sameBoot);
       if (action.kind === 'noop') continue;
       if (action.kind === 'events') {
-        this.send({ type: 'events', sessionId: state.id, events: state.events.slice(action.from), from: action.from });
+        // Include current agent defs: the gap being replayed may contain events
+        // for agents whose defs the client never received.
+        this.send({ type: 'events', sessionId: state.id, events: state.events.slice(action.from), from: action.from, agents: [...state.agents.values()] });
       } else {
         this.send({ type: 'snapshot', sessionId: state.id, session: this.store.snapshot(state), eventOffset: 0, done: true });
       }

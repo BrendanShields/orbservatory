@@ -12,7 +12,14 @@ export type ResumeAction =
   | { kind: 'events'; from: number }
   | { kind: 'snapshot' };
 
-export function resumeAction(since: number, total: number): ResumeAction {
+export function resumeAction(since: number, total: number, sameBoot = true): ResumeAction {
+  // Index cursors are only meaningful within one server process: the stored log
+  // is append-ordered by ingest, and a restarted server re-reads the same files
+  // in a different interleave (root fully, then subagents) than the original
+  // live tailing produced. A cursor minted by another boot therefore points at
+  // different events — even when counts happen to match — so it must never be
+  // trusted for an incremental resume.
+  if (!sameBoot) return { kind: 'snapshot' };
   // Client is already current.
   if (since > 0 && since === total) return { kind: 'noop' };
   // Client is behind by a known gap: stream just the tail it hasn't seen.

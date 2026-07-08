@@ -36,10 +36,12 @@ export class SessionStore {
   private livenessMs: number;
   private contextLimits: Record<string, number>;
   private lastSummariesDigest = '';
+  private bootId?: string;
 
-  constructor(opts?: { livenessMs?: number; contextLimits?: Record<string, number> }) {
+  constructor(opts?: { livenessMs?: number; contextLimits?: Record<string, number>; bootId?: string }) {
     this.livenessMs = opts?.livenessMs ?? 5 * 60_000;
     this.contextLimits = opts?.contextLimits ?? {};
+    this.bootId = opts?.bootId;
   }
 
   setLivenessMs(ms: number) {
@@ -165,7 +167,7 @@ export class SessionStore {
 
   addSubscriber(sub: Subscriber) {
     this.subscribers.add(sub);
-    sub.send({ type: 'sessions', sessions: this.summaries() });
+    sub.send({ type: 'sessions', sessions: this.summaries(), bootId: this.bootId });
   }
 
   removeSubscriber(sub: Subscriber) {
@@ -182,7 +184,7 @@ export class SessionStore {
     const digest = JSON.stringify(sessions);
     if (digest === this.lastSummariesDigest) return;
     this.lastSummariesDigest = digest;
-    const msg: ServerMessage = { type: 'sessions', sessions };
+    const msg: ServerMessage = { type: 'sessions', sessions, bootId: this.bootId };
     for (const sub of this.subscribers) sub.send(msg);
   }
 }

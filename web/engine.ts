@@ -23,6 +23,75 @@ export interface Engine {
   evs: AwvEvent[];
   duration: number;
   order: string[];
+  warp: TimeWarp;
+}
+
+/**
+ * Nonlinear timeline mapping: idle stretches longer than an adaptive threshold are
+ * log-compressed so activity stays readable. Purely visual — simulation, playback
+ * and events always use real session time; only the scrubber maps through the warp.
+ */
+export interface TimeWarp {
+  /** Real session time → 0..1 fraction of timeline width. */
+  x(t: number): number;
+  /** 0..1 timeline fraction → real session time. */
+  t(x: number): number;
+  /** Compressed idle stretches [t0, t1) in real session time, sorted. */
+  gaps: Array<{ t0: number; t1: number }>;
+}
+
+export function buildWarp(evs: Array<{ t: number }>, duration: number): TimeWarp {
+  const threshold = Math.min(120_000, Math.max(15_000, duration * 0.02));
+  const ts: number[] = [0];
+  for (const e of evs) {
+    const t = Math.min(duration, Math.max(0, e.t));
+    if (t > ts[ts.length - 1]) ts.push(t);
+  }
+  if (duration > ts[ts.length - 1]) ts.push(duration);
+  const weights: number[] = [];
+  const gaps: Array<{ t0: number; t1: number }> = [];
+  let act = 0, idle = 0;
+  for (let i = 1; i < ts.length; i++) {
+    const g = ts[i] - ts[i - 1];
+    if (g > threshold) {
+      const w = threshold * (1 + Math.log10(g / threshold));
+      weights.push(w); idle += w;
+      gaps.push({ t0: ts[i - 1], t1: ts[i] });
+    } else { weights.push(g); act += g; }
+  }
+  // Idle never claims more than ~35% of the strip, as long as there is real activity to show.
+  const idleBudget = act * (0.35 / 0.65);
+  if (act > 1000 && idle > idleBudget) {
+    const k = idleBudget / idle;
+    for (let i = 1; i < ts.length; i++) if (ts[i] - ts[i - 1] > threshold) weights[i - 1] *= k;
+  }
+  const xs: number[] = [0];
+  for (const w of weights) xs.push(xs[xs.length - 1] + w);
+  const total = xs[xs.length - 1] || 1;
+  const seg = (arr: number[], v: number) => {
+    let lo = 0, hi = arr.length - 1;
+    while (lo < hi - 1) { const m = (lo + hi) >> 1; if (arr[m] <= v) lo = m; else hi = m; }
+    return lo;
+  };
+  return {
+    gaps,
+    x(t: number): number {
+      if (ts.length < 2) return 0;
+      t = Math.min(duration, Math.max(0, t));
+      const i = seg(ts, t);
+      const span = ts[i + 1] - ts[i];
+      const f = span > 0 ? (t - ts[i]) / span : 0;
+      return (xs[i] + f * (xs[i + 1] - xs[i])) / total;
+    },
+    t(x: number): number {
+      if (ts.length < 2) return 0;
+      const v = Math.min(1, Math.max(0, x)) * total;
+      const i = seg(xs, v);
+      const span = xs[i + 1] - xs[i];
+      const f = span > 0 ? (v - xs[i]) / span : 0;
+      return ts[i] + f * (ts[i + 1] - ts[i]);
+    },
+  };
 }
 
 export const COL: Record<string, string> = {
@@ -50,7 +119,9 @@ export function parseSession(sc: AwvSession): Engine {
         const p = agents.get(a.parent)!;
         if (!p.children.includes(e.agent)) p.children.push(e.agent);
       }
-      kf(e.agent, e.t, 0); kf(e.agent, e.t + 500, e.tokens || 1800);
+      // Honest zero: live spawns carry tokens 0 — fabricating a floor here made
+      // every event-starved agent report a fictional token count.
+      kf(e.agent, e.t, 0); kf(e.agent, e.t + 500, e.tokens ?? 0);
     } else if (e.type === 'message' && e.to && agents.has(e.to)) {
       kf(e.to, e.t, (cur[e.to] || 0) + (e.tokens || 0));
     } else if (e.type === 'tool' && agents.has(e.agent)) {
@@ -86,7 +157,7 @@ export function parseSession(sc: AwvSession): Engine {
     if (open != null) a.errRanges.push({ s: open, e: Infinity });
   }
   const duration = Math.max(2500, (evs.length ? evs[evs.length - 1].t : 0) + 2500);
-  return { sc, agents, evs, duration, order: (sc.agents || []).map(a => a.id) };
+  return { sc, agents, evs, duration, order: (sc.agents || []).map(a => a.id), warp: buildWarp(evs, duration) };
 }
 
 export function tokensAt(a: EngineAgent, t: number): number {

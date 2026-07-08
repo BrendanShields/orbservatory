@@ -18,3 +18,12 @@ test('client already current gets nothing', () => {
 test('client ahead of server (truncated/restarted transcript) re-snapshots', () => {
   expect(resumeAction(30, 25)).toEqual({ kind: 'snapshot' });
 });
+
+test('cursor minted by a different server boot is never trusted — always re-snapshot', () => {
+  // A restarted server re-reads transcripts in a different interleave than live
+  // tailing produced, so old indexes point at different events even when the
+  // totals happen to match.
+  expect(resumeAction(10, 25, false)).toEqual({ kind: 'snapshot' });
+  expect(resumeAction(25, 25, false)).toEqual({ kind: 'snapshot' });
+  expect(resumeAction(0, 25, false)).toEqual({ kind: 'snapshot' });
+});

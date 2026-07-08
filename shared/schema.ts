@@ -51,6 +51,8 @@ export interface Settings {
   palette: string;
   layout: string;
   showGrid: boolean;
+  showSubagentNames: boolean;
+  showOrchestratorName: boolean;
   livenessMs: number;
   pollMs: number;
   contextLimits: Record<string, number>;
@@ -73,11 +75,11 @@ export interface SessionSummary {
 }
 
 export type ClientMessage =
-  | { type: 'subscribe'; sessionIds: string[] | 'all-live'; lastEventIndex?: Record<string, number> }
+  | { type: 'subscribe'; sessionIds: string[] | 'all-live'; lastEventIndex?: Record<string, number>; bootId?: string }
   | { type: 'ping' };
 
 export type ServerMessage =
-  | { type: 'sessions'; sessions: SessionSummary[] }
+  | { type: 'sessions'; sessions: SessionSummary[]; bootId?: string }
   | { type: 'snapshot'; sessionId: string; session: AwvSession; eventOffset: number; done?: boolean }
   | { type: 'events'; sessionId: string; events: AwvEvent[]; from: number; agents?: AwvAgent[] }
   | { type: 'settings'; settings: Settings }
