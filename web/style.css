@@ -102,6 +102,7 @@ td.t-tok{min-width:90px}
 .home-empty p{font-size:12px;max-width:480px;margin:0 auto 16px;line-height:1.6}
 
 /* ---------- ⌘K palette ---------- */
+.palette[hidden]{display:none}
 .palette{position:fixed;inset:0;background:rgba(3,10,14,.6);backdrop-filter:blur(4px);z-index:60;display:flex;align-items:flex-start;justify-content:center;padding-top:12vh}
 .palette-card{width:min(640px,92vw);background:rgb(8,20,26);border:1px solid rgba(122,220,242,.25);border-radius:12px;box-shadow:0 18px 60px rgba(0,0,0,.5);overflow:hidden;font-family:'JetBrains Mono',monospace}
 .palette-q{width:100%;box-sizing:border-box;background:transparent;border:0;border-bottom:1px solid rgba(122,220,242,.15);padding:14px 16px;color:#e8f4f8;font:inherit;font-size:14px;outline:none}
