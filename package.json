@@ -1,0 +1,25 @@
+{
+  "name": "claude-viz",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "claude-viz": "./scripts/cli.ts"
+  },
+  "files": [
+    "server",
+    "web",
+    "shared",
+    "scripts"
+  ],
+  "scripts": {
+    "start": "bun run scripts/cli.ts",
+    "serve": "bun run server/index.ts",
+    "dev": "NODE_ENV=development bun --watch server/index.ts",
+    "build:bin": "bun run scripts/compile.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0"
+  }
+}
