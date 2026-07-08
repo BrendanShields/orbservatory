@@ -1,4 +1,5 @@
 import type { AwvAgent, AwvEvent, AwvSession } from '../shared/schema';
+import { eventRank, hashStr } from '../shared/order';
 
 export interface EngineAgent {
   def: AwvAgent;
@@ -118,6 +119,7 @@ export function radius(a: EngineAgent): number { return [28, 17, 12, 9.5, 8][Mat
 export function ringColor(p: number): string { return p < 0.6 ? '#6fe3c3' : p < 0.85 ? '#f3c47e' : '#ff7a70'; }
 export function fmt(n: number): string { if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'; if (n >= 1000) return (n / 1000).toFixed(1) + 'k'; return String(Math.round(n)); }
 export function fmtT(ms: number): string { const sign = ms < 0 ? '-' : ''; const t = Math.abs(ms) / 1000; const h = Math.floor(t / 3600); const m = Math.floor((t % 3600) / 60); const s = Math.floor(t % 60); return sign + (h ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`); }
-export function hash(s: string): number { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h; }
+/** Re-exported so render.ts and others import a single canonical hash. */
+export const hash = hashStr;
 
-function order(type: string): number { return ({ spawn: 0, message: 1, tool: 2, compact: 3, error: 4, retry: 5, complete: 6 } as Record<string, number>)[type] ?? 9; }
+const order = eventRank;

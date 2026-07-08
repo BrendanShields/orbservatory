@@ -9,6 +9,8 @@ interface WatchOptions {
   root?: string;
   pollMs?: number;
   livenessMs?: number;
+  /** Disable fs.watch (tests drive scan() manually and rely on polling only). */
+  watchFs?: boolean;
 }
 
 interface FileSource {
@@ -27,11 +29,17 @@ export class ClaudeProjectWatcher {
   private nudgeTimer: Timer | null = null;
   private busy = false;
   private livenessMs: number;
+  private watchFs: boolean;
+  // Cache resolved subagent meta by file path. meta.json is written once per
+  // agent, so once we've read real fields we never re-read; until then (create
+  // race) we retry each poll so a late-arriving meta still gets picked up.
+  private metaCache = new Map<string, SubagentMeta>();
 
   constructor(private store: SessionStore, opts?: WatchOptions) {
     this.root = opts?.root || process.env.CLAUDE_PROJECTS_DIR || join(homedir(), '.claude', 'projects');
     this.pollMs = opts?.pollMs ?? 1500;
     this.livenessMs = opts?.livenessMs ?? 5 * 60_000;
+    this.watchFs = opts?.watchFs ?? true;
   }
 
   start() {
@@ -109,7 +117,7 @@ export class ClaudeProjectWatcher {
   }
 
   private ensureWatch(path: string) {
-    if (this.watchers.has(path)) return;
+    if (!this.watchFs || this.watchers.has(path)) return;
     try {
       const watcher = watch(path, { persistent: false }, () => {
         if (this.nudgeTimer) clearTimeout(this.nudgeTimer);
@@ -188,7 +196,7 @@ export class ClaudeProjectWatcher {
         const agentId = ent.name.replace(/\.jsonl$/, '');
         sources.push({
           path: p,
-          source: { sessionId: state.sessionId, project: state.project, cwd: state.cwd, filePath: p, kind: 'subagent', agentId, meta: await readMeta(p, agentId) },
+          source: { sessionId: state.sessionId, project: state.project, cwd: state.cwd, filePath: p, kind: 'subagent', agentId, meta: await this.readMetaCached(p, agentId) },
         });
       } else if (ent.isDirectory() && ent.name === 'workflows') {
         const wfs = await safeReaddir(p, true);
@@ -210,13 +218,29 @@ export class ClaudeProjectWatcher {
             const agentId = file.name.replace(/\.jsonl$/, '');
             sources.push({
               path: fp,
-              source: { sessionId: state.sessionId, project: state.project, cwd: state.cwd, filePath: fp, kind: 'workflow-agent', workflowId: wf.name, agentId, meta: await readMeta(fp, agentId) },
+              source: { sessionId: state.sessionId, project: state.project, cwd: state.cwd, filePath: fp, kind: 'workflow-agent', workflowId: wf.name, agentId, meta: await this.readMetaCached(fp, agentId) },
             });
           }
         }
       }
     }
     return sources;
+  }
+
+  /**
+   * Resolve subagent meta with caching. `readMeta` returns a fallback of just
+   * `{ slug }` when meta.json is missing/unreadable; we only cache once real
+   * fields (agentType/description/toolUseId) have arrived, so the create-race
+   * retry from the original design is preserved.
+   */
+  private async readMetaCached(jsonlPath: string, slug: string): Promise<SubagentMeta | null> {
+    const cached = this.metaCache.get(jsonlPath);
+    if (cached) return cached;
+    const meta = await readMeta(jsonlPath, slug);
+    if (meta && (meta.agentType || meta.description || meta.toolUseId)) {
+      this.metaCache.set(jsonlPath, meta);
+    }
+    return meta;
   }
 
   private async readNewLines(state: SessionState, file: FileSource) {

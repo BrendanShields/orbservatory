@@ -1,4 +1,5 @@
 import type { AwvAgent, AwvEvent, AwvSession } from '../shared/schema';
+import { hashStr } from '../shared/order';
 
 export interface TranscriptSource {
   sessionId: string;
@@ -509,9 +510,7 @@ export class TranscriptNormalizer {
   }
 
   private hash(s: string): number {
-    let h = 0;
-    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-    return h;
+    return hashStr(s);
   }
 }
 
@@ -519,25 +518,9 @@ export function rootAgentId(sessionId: string): string {
   return `session:${sessionId}`;
 }
 
-export function spawnEventsForAgents(agents: AwvAgent[], normalizer: TranscriptNormalizer): AwvEvent[] {
-  // Back-compat helper for tests; live normalization emits spawn via materializeAgentSpawns.
-  return agents.map((a) => ({ t: normalizer.startedAt ? 0 : 0, type: 'spawn' as const, agent: a.id }));
-}
-
-export function materializeAgentSpawns(agents: AwvAgent[], owner: TranscriptNormalizer): AwvEvent[] {
-  return agents.map((agent) => {
-    const any = agent as any;
-    return { t: any.__t ?? 0, type: 'spawn' as const, agent: agent.id, parent: any.__parent, tokens: 0 };
-  });
-}
-
 function stamp<T extends AwvEvent>(event: T, ts: number): T {
   event.ts = new Date(ts).toISOString();
   return event;
-}
-
-export function spawnFromAgent(agent: AwvAgent, parent: string | undefined, t: number, ts: string): AwvEvent {
-  return { t, ts, type: 'spawn', agent: agent.id, parent, tokens: 0 };
 }
 
 function safeJson(raw: string): any | null {
@@ -665,8 +648,4 @@ export function truncate(s: string, n: number): string {
 export function decodeProjectName(name: string): string {
   try { return decodeURIComponent(name).replace(/-/g, '/').split('/').filter(Boolean).pop() || name; }
   catch { return name; }
-}
-
-function eventOrder(type: string): number {
-  return ({ spawn: 0, message: 1, tool: 2, compact: 3, error: 4, retry: 5, complete: 6 } as Record<string, number>)[type] ?? 9;
 }

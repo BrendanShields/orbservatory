@@ -5,7 +5,8 @@ process.env.NODE_ENV ||= 'production';
 
 const mod = await import('../server/index');
 const port = (mod as { port?: number }).port ?? Number(process.env.PORT) ?? 8787;
-const url = `http://localhost:${port}`;
+const host = (mod as { host?: string }).host ?? 'localhost';
+const url = `http://${host}:${port}`;
 
 if (!process.env.CLAUDE_VIZ_NO_OPEN) openBrowser(url);
 

@@ -1,4 +1,5 @@
 import type { AwvAgent, AwvEvent, AwvSession, SessionSummary, ServerMessage } from '../shared/schema';
+import { eventRank } from '../shared/order';
 import { TranscriptNormalizer } from './normalizer';
 
 export interface SessionState {
@@ -106,16 +107,17 @@ export class SessionStore {
       changed = true;
     }
     if (events.length) {
-      events.sort(byTime);
-      if (!state.loading && state.events.length && events[0].t < state.events[state.events.length - 1].t) {
-        // Rare out-of-order tail append (root vs subagent files in one poll): insert then resort.
-        state.events.push(...events);
-        state.events.sort(byTime);
-      } else {
-        // Initial load appends unsorted (sorted once in finishLoad); steady-state appends are chronological.
-        state.events.push(...events);
+      // Append-only: the stored log preserves arrival order so a subscriber's
+      // array-index cursor stays valid even when a later poll surfaces
+      // out-of-order events (root vs subagent files in one tick). Canonical
+      // time ordering is applied at read time in snapshot(); the client also
+      // sorts every batch it receives, so display order is unaffected.
+      state.events.push(...events);
+      let lastTs = 0;
+      for (const e of events) {
+        const n = e.ts ? Date.parse(e.ts) : 0;
+        if (Number.isFinite(n) && n > lastTs) lastTs = n;
       }
-      const lastTs = Math.max(...events.map((e) => e.ts ? Date.parse(e.ts) : 0).filter(Number.isFinite));
       if (lastTs > 0) state.lastActive = Math.max(state.lastActive, lastTs);
       changed = true;
     }
@@ -129,15 +131,18 @@ export class SessionStore {
     if (changed && !state.loading) this.broadcastSessions();
   }
 
-  /** Called once when a session's initial full read completes: establishes the canonical event order. */
+  /** Called once when a session's initial full read completes. */
   finishLoad(state: SessionState) {
-    state.events.sort(byTime);
     state.loaded = true;
     state.loading = false;
   }
 
   snapshot(state: SessionState): AwvSession {
-    const sc = state.normalizer.snapshot(state.events);
+    // The stored log is append-ordered; hand the normalizer a time-sorted copy
+    // so snapshot events are canonical. Sorting a copy keeps array-index
+    // cursors (used for reconnect resync) stable against the append-only log.
+    const ordered = state.events.slice().sort(byTime);
+    const sc = state.normalizer.snapshot(ordered);
     // The normalizer owns canonical agent ordering, but make sure late merged agents are present.
     const byId = new Map(sc.agents.map((a) => [a.id, a]));
     for (const a of state.agents.values()) byId.set(a.id, a);
@@ -170,9 +175,5 @@ export class SessionStore {
 }
 
 function byTime(a: AwvEvent, b: AwvEvent): number {
-  return a.t - b.t || order(a.type) - order(b.type);
-}
-
-function order(type: string): number {
-  return ({ spawn: 0, message: 1, tool: 2, compact: 3, error: 4, retry: 5, complete: 6 } as Record<string, number>)[type] ?? 9;
+  return a.t - b.t || eventRank(a.type) - eventRank(b.type);
 }

@@ -4,6 +4,7 @@ import { SessionStore, type SessionState, type Subscriber } from './store';
 import { ClaudeProjectWatcher } from './watch';
 import { SettingsStore } from './settings';
 import { resolveConfig } from './config';
+import { resumeAction } from './resume';
 import index from '../web/index.html';
 
 const settings = new SettingsStore();
@@ -23,6 +24,7 @@ function applySettings(s: Settings) {
 
 const server = Bun.serve<{ sub?: WsSubscriber }>({
   port: cfg.port,
+  hostname: cfg.host,
   development: process.env.NODE_ENV === 'development',
   routes: { '/': index },
   async fetch(req, server) {
@@ -76,9 +78,11 @@ const server = Bun.serve<{ sub?: WsSubscriber }>({
   },
 });
 
-console.log(`claude-viz listening on http://localhost:${server.port}`);
+const displayHost = cfg.host === '127.0.0.1' || cfg.host === '0.0.0.0' ? 'localhost' : cfg.host;
+console.log(`claude-viz listening on http://${displayHost}:${server.port}`);
 
 export const port = server.port;
+export const host = displayHost;
 
 class WsSubscriber implements Subscriber {
   private mode: 'all-live' | 'ids' = 'all-live';
@@ -102,9 +106,10 @@ class WsSubscriber implements Subscriber {
     for (const state of states) {
       await watcher.ensureLoaded(state);
       const since = msg.lastEventIndex?.[state.id] ?? 0;
-      if (since > 0 && since >= state.events.length) continue;
-      if (since > 0 && since < state.events.length) {
-        this.send({ type: 'events', sessionId: state.id, events: state.events.slice(since), from: since });
+      const action = resumeAction(since, state.events.length);
+      if (action.kind === 'noop') continue;
+      if (action.kind === 'events') {
+        this.send({ type: 'events', sessionId: state.id, events: state.events.slice(action.from), from: action.from });
       } else {
         this.send({ type: 'snapshot', sessionId: state.id, session: this.store.snapshot(state), eventOffset: 0, done: true });
       }

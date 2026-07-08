@@ -1,0 +1,71 @@
+import { expect, test } from 'bun:test';
+import { SessionStore, type SessionState, type Subscriber } from '../server/store';
+import type { AwvAgent, AwvEvent, ServerMessage } from '../shared/schema';
+
+function makeStore() {
+  const store = new SessionStore();
+  const state = store.upsertSession({
+    id: 'demo/s1', project: 'demo', sessionId: 's1',
+    rootFile: '/tmp/s1.jsonl', sessionDir: '/tmp/s1', lastActive: Date.now(),
+  });
+  return { store, state };
+}
+
+class CapturingSubscriber implements Subscriber {
+  messages: ServerMessage[] = [];
+  send(m: ServerMessage) { this.messages.push(m); }
+  wants() { return true; }
+  wantsExplicitly() { return false; }
+  events() { return this.messages.filter((m) => m.type === 'events') as Extract<ServerMessage, { type: 'events' }>[]; }
+}
+
+const ev = (t: number, type: AwvEvent['type'] = 'tool'): AwvEvent =>
+  ({ t, type, agent: 'session:s1', tool: 'Read', ts: new Date(1_000 + t).toISOString() } as AwvEvent);
+
+test('merge keeps the stored log append-only even when a batch arrives out of order', () => {
+  const { store, state } = makeStore();
+  store.merge(state, [], [ev(100), ev(300)]);
+  // A later poll surfaces an event that is earlier in time than the last stored one.
+  store.merge(state, [], [ev(200)]);
+  expect(state.events.map((e) => e.t)).toEqual([100, 300, 200]); // arrival order preserved
+});
+
+test('snapshot returns events in canonical time order regardless of arrival order', () => {
+  const { store, state } = makeStore();
+  store.merge(state, [], [ev(100), ev(300)]);
+  store.merge(state, [], [ev(200)]);
+  const snap = store.snapshot(state);
+  expect(snap.events.map((e) => e.t)).toEqual([100, 200, 300]);
+});
+
+test('fan-out reports a from offset that matches the append-only index', () => {
+  const { store, state } = makeStore();
+  const sub = new CapturingSubscriber();
+  store.addSubscriber(sub);
+  store.merge(state, [], [ev(100), ev(300)]);
+  store.merge(state, [], [ev(200)]);
+  const batches = sub.events();
+  expect(batches.map((b) => b.from)).toEqual([0, 2]);
+  // slice(from) on the stored log reconstructs exactly what each batch delivered.
+  for (const b of batches) {
+    expect(state.events.slice(b.from, b.from + b.events.length)).toEqual(b.events);
+  }
+});
+
+test('an out-of-order tail append never rewrites earlier indices (index-resume safety)', () => {
+  const { store, state } = makeStore();
+  store.merge(state, [], [ev(100), ev(300)]);
+  const before = state.events.slice(0, 2);
+  store.merge(state, [], [ev(50)]); // earlier than everything already stored
+  // Indices 0..1 are untouched, so a client cursor at 2 still points past them.
+  expect(state.events.slice(0, 2)).toEqual(before);
+  expect(state.events.length).toBe(3);
+});
+
+test('agents merge into the snapshot', () => {
+  const { store, state } = makeStore();
+  const agent: AwvAgent = { id: 'session:s1', name: 'root', role: 'root' };
+  store.merge(state, [agent], [ev(100, 'spawn')]);
+  const snap = store.snapshot(state);
+  expect(snap.agents.some((a) => a.id === 'session:s1')).toBe(true);
+});
