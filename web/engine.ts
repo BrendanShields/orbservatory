@@ -72,6 +72,10 @@ export function parseSession(sc: AwvSession): Engine {
     while (p && agents.has(p)) { d++; p = agents.get(p)!.parent; }
     a.depth = d; a.kf.sort((x, y) => x.t - y.t); a.evs.sort((x, y) => x.t - y.t);
     a.evT = a.evs.map(e => e.t);
+    // An agent with recorded activity must exist from its first event — guards
+    // against spawn events stamped far in the future by clock-less transcript
+    // records (which would otherwise hide the agent for the whole replay).
+    if (a.evs.length) a.spawnT = Math.min(a.spawnT, a.evs[0].t);
     let open: number | null = null;
     for (const e of a.evs) {
       const own = 'agent' in e && (e as any).agent === a.id;

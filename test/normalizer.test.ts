@@ -134,3 +134,31 @@ test('names workflow + fan-out agents and never creates a journal node', () => {
   expect(agents.some(a => a.id === 'session:s1:agent-a1')).toBe(true);
   expect(done.events.some(e => e.type === 'complete' && e.agent === 'session:s1:agent-a1')).toBe(true);
 });
+
+test('root spawn is not stamped with wall-clock time when the transcript starts with metadata records', () => {
+  const n = new TranscriptNormalizer({ sessionId: 's1', project: 'demo' });
+  n.peekLine(JSON.stringify({ type: 'user', timestamp: '2026-06-23T10:00:00.000Z', message: { content: 'original prompt' } }));
+  const a = n.normalizeLine({ type: 'last-prompt', leafUuid: 'x', sessionId: 's1' }, rootSource);
+  const b = n.normalizeLine({ type: 'user', timestamp: '2026-06-23T10:00:05.000Z', message: { content: 'original prompt' } }, rootSource);
+  const spawn = [...a.events, ...b.events].find(e => e.type === 'spawn') as any;
+  expect(spawn.t).toBeLessThanOrEqual(5000);
+});
+
+test('records without timestamps inherit the previous timestamp instead of wall clock', () => {
+  const n = new TranscriptNormalizer({ sessionId: 's1', project: 'demo' });
+  n.normalizeLine({ type: 'user', timestamp: '2026-06-23T10:00:00.000Z', message: { content: 'start' } }, rootSource);
+  const b = n.normalizeLine({ type: 'user', message: { content: 'no clock on this record' } }, rootSource);
+  const msg = b.events.find(e => e.type === 'message') as any;
+  expect(msg.t).toBe(0);
+});
+
+test('journal ingested before any timestamped line does not poison startedAt', () => {
+  const n = new TranscriptNormalizer({ sessionId: 's1', project: 'demo' });
+  const journalSource = { sessionId: 's1', project: 'demo', filePath: '/tmp/s1/subagents/workflows/wf_1/journal.jsonl', kind: 'workflow-journal' as const, workflowId: 'wf_1' };
+  n.ingestJournal({ type: 'result', agentId: 'agent-a1' }, journalSource);
+  const a = n.normalizeLine({ type: 'user', timestamp: '2026-06-23T10:00:00.000Z', message: { content: 'start' } }, rootSource);
+  const b = n.normalizeLine({ type: 'user', timestamp: '2026-06-23T10:01:00.000Z', message: { content: 'later' } }, rootSource);
+  const m1 = a.events.find(e => e.type === 'message') as any;
+  const m2 = b.events.find(e => e.type === 'message') as any;
+  expect(m2.t - m1.t).toBe(60000);
+});

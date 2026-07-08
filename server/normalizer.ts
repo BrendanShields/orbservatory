@@ -37,7 +37,7 @@ export interface NormalizedBatch {
   titleChanged?: boolean;
 }
 
-const HOUSEKEEPING_TYPES = new Set(['attachment', 'file-history-snapshot', 'mode', 'permission-mode', 'queue-operation', 'system', 'progress', 'cost']);
+const HOUSEKEEPING_TYPES = new Set(['attachment', 'file-history-snapshot', 'last-prompt', 'mode', 'permission-mode', 'queue-operation', 'system', 'progress', 'cost']);
 // Most current Claude models have a 1M-token context window; Haiku 4.5 and the Claude 3.x
 // generation are 200k. Unknown models get the 1M default.
 export const DEFAULT_CONTEXT_LIMIT = 1_000_000;
@@ -57,6 +57,7 @@ export class TranscriptNormalizer {
   title: string;
   cwd?: string;
   startedAt = 0;
+  private lastTs = 0;
 
   private agents = new Map<string, AwvAgent>();
   private spawned = new Set<string>();
@@ -169,9 +170,7 @@ export class TranscriptNormalizer {
       if (root) { root.name = truncate(this.projectName, 54); root.task = this.cwd; }
     }
     this.dirty.clear();
-    const ts = timestampOf(rec);
-    if (!this.startedAt) this.startedAt = ts;
-    const t = Math.max(0, ts - this.startedAt);
+    const { ts, t } = this.clock(rec);
     const agentId = this.ensureSourceAgent(source, rec, t, new Date(ts).toISOString());
     const agents: AwvAgent[] = [];
     const events: AwvEvent[] = [];
@@ -276,9 +275,7 @@ export class TranscriptNormalizer {
     const bareId = bareIdOf((rec as any).agentId);
     if (!bareId) return { agents: [], events: [] };
     this.dirty.clear();
-    const ts = timestampOf(rec);
-    if (!this.startedAt) this.startedAt = ts;
-    const t = Math.max(0, ts - this.startedAt);
+    const { ts, t } = this.clock(rec);
     const iso = new Date(ts).toISOString();
     const wf = this.ensureWorkflowAgent(source.workflowId, this.ensureRootPlaceholder(source, t, iso).id, t, iso);
     const awvId = this.upsertSubagent(bareId, { parent: wf.id, role: 'workflow agent', t, ts: iso, wfName: this.wfMeta.get(source.workflowId)?.workflowName });
@@ -292,6 +289,21 @@ export class TranscriptNormalizer {
       this.completed.add(awvId);
     }
     return this.finish(agents, events);
+  }
+
+  /**
+   * Session-relative time for a record. Records without a parseable timestamp
+   * (journal lines, some metadata records) inherit the last real timestamp seen
+   * instead of Date.now() — wall clock at ingest is wildly wrong when a finished
+   * session is re-read from disk, and a single future-stamped spawn/complete
+   * stretches the timeline by days and hides the agent for the whole replay.
+   * Only real timestamps may establish startedAt.
+   */
+  private clock(rec: any): { ts: number; t: number } {
+    const real = realTimestampOf(rec);
+    if (real) { this.lastTs = real; if (!this.startedAt) this.startedAt = real; }
+    const ts = real ?? (this.lastTs || Date.now());
+    return { ts, t: this.startedAt ? Math.max(0, ts - this.startedAt) : 0 };
   }
 
   private ensureSourceAgent(source: TranscriptSource, rec: any, t: number, ts: string): string {
@@ -541,10 +553,10 @@ function safeJson(raw: string): any | null {
   try { return JSON.parse(raw); } catch { return null; }
 }
 
-function timestampOf(rec: any): number {
+function realTimestampOf(rec: any): number | null {
   const v = rec.timestamp || rec.createdAt || rec.time;
   const n = typeof v === 'number' ? v : Date.parse(v || '');
-  return Number.isFinite(n) ? n : Date.now();
+  return Number.isFinite(n) ? n : null;
 }
 
 function contentBlocks(content: any): any[] {
