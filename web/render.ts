@@ -42,7 +42,7 @@ export class VisualRenderer {
   sprites: Record<string, HTMLCanvasElement> = {};
   /** Last rendered simulation time, used as the base for keyboard scrubbing. */
   private seekAt = 0;
-  private down: { x: number; y: number; moved: number; node: NodeState | null; cx: number; cy: number } | null = null;
+  private down: { x: number; y: number; moved: number; node: NodeState | null; cx: number; cy: number; px: number; py: number; pt: number; pvx: number; pvy: number } | null = null;
   private scrub = false;
   onSelect?: (id: string | null) => void;
   onSeek?: (t: number) => void;
@@ -120,7 +120,7 @@ export class VisualRenderer {
     el.addEventListener('pointerdown', e => {
       el.setPointerCapture(e.pointerId);
       const hit = this.hitTest(e.offsetX, e.offsetY);
-      this.down = { x: e.offsetX, y: e.offsetY, moved: 0, node: hit, cx: this.cam.x, cy: this.cam.y };
+      this.down = { x: e.offsetX, y: e.offsetY, moved: 0, node: hit, cx: this.cam.x, cy: this.cam.y, px: e.offsetX, py: e.offsetY, pt: e.timeStamp, pvx: 0, pvy: 0 };
     });
     el.addEventListener('pointermove', e => {
       if (this.down) {
@@ -129,6 +129,13 @@ export class VisualRenderer {
         if (this.down.node) {
           const n = this.down.node; const w = this.toWorld(e.offsetX, e.offsetY);
           n.x = w.x; n.y = w.y; n.vx = 0; n.vy = 0;
+          const d = this.down, dtm = e.timeStamp - d.pt;
+          if (dtm > 0) {
+            const k = .7;
+            d.pvx = d.pvx * (1 - k) + ((e.offsetX - d.px) / dtm) * k;
+            d.pvy = d.pvy * (1 - k) + ((e.offsetY - d.py) / dtm) * k;
+            d.px = e.offsetX; d.py = e.offsetY; d.pt = e.timeStamp;
+          }
         } else if (this.down.moved > 4) {
           this.userCam = true; this.focusId = null;
           this.cam.x = this.down.cx - dx / this.cam.s; this.cam.y = this.down.cy - dy / this.cam.s;
@@ -139,16 +146,23 @@ export class VisualRenderer {
         el.style.cursor = hit ? 'pointer' : 'default';
       }
     });
-    el.addEventListener('pointerup', () => {
-      if (this.down && this.down.moved < 5) {
-        this.selectedId = this.down.node ? this.down.node.id : null;
+    el.addEventListener('pointerup', e => {
+      const d = this.down;
+      if (d && d.moved < 5) {
+        this.selectedId = d.node ? d.node.id : null;
         this.onSelect?.(this.selectedId);
+      } else if (d?.node && !this.reduceMotion && e.timeStamp - d.pt <= 80) {
+        let vx = (d.pvx / this.cam.s) * 16, vy = (d.pvy / this.cam.s) * 16;
+        const sp = Math.hypot(vx, vy);
+        if (sp > 7) { vx *= 7 / sp; vy *= 7 / sp; }
+        d.node.vx = vx; d.node.vy = vy;
       }
       this.down = null;
     });
     el.addEventListener('wheel', e => {
       e.preventDefault();
-      const f = Math.exp(-e.deltaY * 0.0013);
+      const dy = Math.max(-240, Math.min(240, e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? this.canvas.clientHeight : 1)));
+      const f = Math.exp(-dy * (e.ctrlKey ? 0.0045 : 0.0013));
       const s2 = Math.min(3, Math.max(0.12, this.cam.s * f));
       const wp = this.toWorld(e.offsetX, e.offsetY);
       this.cam.x = wp.x - (e.offsetX - this.canvas.clientWidth / 2) / s2;
@@ -163,7 +177,7 @@ export class VisualRenderer {
     let best: NodeState | null = null, bd = 1e9;
     for (const n of this.nodes.values()) {
       const d = Math.hypot(n.x - wp.x, n.y - wp.y);
-      if (d < n.r + 8 && d < bd) { bd = d; best = n; }
+      if (d * this.cam.s < Math.max(n.r * this.cam.s, 6) + 8 && d < bd) { bd = d; best = n; }
     }
     return best;
   }
