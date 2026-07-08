@@ -71,6 +71,51 @@ test('agents merge into the snapshot', () => {
   expect(snap.agents.some((a) => a.id === 'session:s1')).toBe(true);
 });
 
+function statsMessages(sub: CapturingSubscriber) {
+  return sub.messages.filter((m) => m.type === 'stats') as Extract<ServerMessage, { type: 'stats' }>[];
+}
+
+test('a new subscriber is greeted with a stats message for known sessions', () => {
+  const { store, state } = makeStore();
+  state.loaded = true;
+  store.merge(state, [], [ev(100), ev(200), ev(300)]);
+  const sub = new CapturingSubscriber();
+  store.addSubscriber(sub);
+  const greeting = statsMessages(sub);
+  expect(greeting).toHaveLength(1);
+  const s1 = greeting[0].stats.find((s) => s.sessionId === 'demo/s1')!;
+  expect(s1.toolCalls).toBe(3);
+  expect(s1.tier).toBe('simple');
+});
+
+test('transcript growth surfaces in the next stats broadcast', () => {
+  const { store, state } = makeStore();
+  state.loaded = true;
+  store.merge(state, [], [ev(100)]);
+  const sub = new CapturingSubscriber();
+  store.addSubscriber(sub);
+
+  store.merge(state, [], [ev(200), ev(300)]);
+  store.broadcastSessions(); // the scan-cycle flush point
+  const latest = statsMessages(sub).at(-1)!;
+  expect(latest.stats.find((s) => s.sessionId === 'demo/s1')!.toolCalls).toBe(3);
+});
+
+test('changing tier thresholds re-finalizes and re-broadcasts stats', () => {
+  const { store, state } = makeStore();
+  state.loaded = true;
+  store.merge(state, [], [ev(100), ev(200), ev(300)]);
+  const sub = new CapturingSubscriber();
+  store.addSubscriber(sub);
+  expect(statsMessages(sub).at(-1)!.stats[0].tier).toBe('simple');
+
+  sub.messages = [];
+  store.setStatsConfig({}, { simpleMaxTools: 1, complexMinSubagents: 99, complexMinTools: 99 });
+  const rebroadcast = statsMessages(sub);
+  expect(rebroadcast).toHaveLength(1);
+  expect(rebroadcast[0].stats.find((s) => s.sessionId === 'demo/s1')!.tier).toBe('moderate');
+});
+
 test('setContextLimits live-updates loaded agents that have observed models', () => {
   const { store, state } = makeStore();
   const source = { sessionId: 's1', project: 'demo', filePath: '/tmp/s1.jsonl', kind: 'root' as const };

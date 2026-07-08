@@ -47,6 +47,23 @@ export interface AwvSession {
   events: AwvEvent[];
 }
 
+export interface ModelPricing {
+  /** USD per million tokens. */
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheCreation: number;
+}
+
+export interface TierThresholds {
+  /** "Simple" requires 0 subagents and fewer tool calls than this. */
+  simpleMaxTools: number;
+  /** "Complex" when subagents >= this… */
+  complexMinSubagents: number;
+  /** …or tool calls >= this, or any compaction. */
+  complexMinTools: number;
+}
+
 export interface Settings {
   palette: string;
   layout: string;
@@ -55,7 +72,75 @@ export interface Settings {
   pollMs: number;
   contextLimits: Record<string, number>;
   providers: Record<string, boolean>;
+  pricing: Record<string, ModelPricing>;
+  tierThresholds: TierThresholds;
   port: number;
+}
+
+export interface TokenTotals {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheCreation: number;
+  total: number;
+}
+
+export type SessionTier = 'simple' | 'moderate' | 'complex';
+
+/** Pricing/threshold-independent stats computed from one full transcript parse (cacheable). */
+export interface SessionStatsBase {
+  sessionId: string;
+  tokens: TokenTotals;
+  tokensByModel: Record<string, TokenTotals>;
+  toolCalls: number;
+  toolBreakdown: Record<string, number>;
+  distinctTools: number;
+  skills: Record<string, number>;
+  subagentCount: number;
+  treeDepth: number;
+  compactions: number;
+  retries: number;
+  errors: number;
+  userTurns: number;
+  durationMs: number;
+  models: string[];
+  firstActive: number;
+  lastActive: number;
+  partial?: boolean;
+}
+
+export interface SessionStats extends SessionStatsBase {
+  /** Present only when every used model is in the pricing map. */
+  costUsd?: number;
+  tier: SessionTier;
+}
+
+export type SearchField = 'prompt' | 'assistant' | 'tool' | 'skill' | 'title';
+
+export interface SearchPart {
+  f: SearchField;
+  s: string;
+}
+
+export interface SearchRequest {
+  q: string;
+  /** Optional allowlist (client-side metadata filter intersection). */
+  sessionIds?: string[];
+  limit?: number;
+}
+
+export interface SearchMatch {
+  sessionId: string;
+  field: SearchField;
+  snippet: string;
+}
+
+export interface SearchResponse {
+  matches: SearchMatch[];
+  /** True when the scan hit its time budget before covering every candidate. */
+  partial: boolean;
+  scanned: number;
+  total: number;
 }
 
 export interface SessionSummary {
@@ -80,6 +165,7 @@ export type ServerMessage =
   | { type: 'sessions'; sessions: SessionSummary[] }
   | { type: 'snapshot'; sessionId: string; session: AwvSession; eventOffset: number; done?: boolean }
   | { type: 'events'; sessionId: string; events: AwvEvent[]; from: number; agents?: AwvAgent[] }
+  | { type: 'stats'; stats: SessionStats[] }
   | { type: 'settings'; settings: Settings }
   | { type: 'pong' }
   | { type: 'error'; message: string };

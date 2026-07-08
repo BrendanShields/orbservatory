@@ -1,12 +1,14 @@
 import type { ServerWebSocket } from 'bun';
 import { existsSync } from 'node:fs';
-import type { ClientMessage, ServerMessage, SessionSource, Settings } from '../shared/schema';
+import type { ClientMessage, SearchRequest, SearchResponse, ServerMessage, SessionSource, Settings } from '../shared/schema';
 import { SessionStore, type SessionState, type Subscriber } from './store';
 import { ClaudeProjectWatcher } from './providers/claude';
 import { CodexProvider, defaultCodexRoot } from './providers/codex';
 import { OpencodeProvider, defaultOpencodeDataDir, findOpencodeDb } from './providers/opencode';
 import { CopilotProvider, defaultCopilotRoot } from './providers/copilot';
 import type { SessionProvider } from './providers/types';
+import { StatsCache } from './statsCache';
+import { searchDocs } from './searchIndex';
 import { SettingsStore } from './settings';
 import { resolveConfig } from './config';
 import { resumeAction } from './resume';
@@ -16,10 +18,18 @@ const settings = new SettingsStore();
 await settings.load();
 const cfg = resolveConfig(settings.get());
 
-const store = new SessionStore({ livenessMs: cfg.livenessMs, contextLimits: cfg.contextLimits });
+const store = new SessionStore({
+  livenessMs: cfg.livenessMs,
+  contextLimits: cfg.contextLimits,
+  pricing: settings.get().pricing,
+  tierThresholds: settings.get().tierThresholds,
+});
+// Historical-stats cache is claude-only for now; other providers surface
+// event-derived (partial) stats once their sessions load.
+const statsCache = new StatsCache();
 
 const providerFactories: Record<SessionSource, () => SessionProvider | null> = {
-  claude: () => new ClaudeProjectWatcher(store, { root: cfg.root, pollMs: cfg.pollMs, livenessMs: cfg.livenessMs }),
+  claude: () => new ClaudeProjectWatcher(store, { root: cfg.root, pollMs: cfg.pollMs, livenessMs: cfg.livenessMs, statsCache }),
   codex: () => (existsSync(defaultCodexRoot()) ? new CodexProvider(store, { pollMs: cfg.pollMs, livenessMs: cfg.livenessMs }) : null),
   opencode: () => (findOpencodeDb(defaultOpencodeDataDir()) ? new OpencodeProvider(store, { pollMs: cfg.pollMs, livenessMs: cfg.livenessMs }) : null),
   copilot: () => (existsSync(defaultCopilotRoot()) ? new CopilotProvider(store, { pollMs: cfg.pollMs, livenessMs: cfg.livenessMs }) : null),
@@ -48,6 +58,7 @@ function syncProviders(s: Settings) {
 function applySettings(s: Settings) {
   store.setLivenessMs(s.livenessMs);
   store.setContextLimits(s.contextLimits);
+  store.setStatsConfig(s.pricing, s.tierThresholds);
   syncProviders(s);
   for (const p of providers.values()) {
     p.setLivenessMs(s.livenessMs);
@@ -85,6 +96,14 @@ const server = Bun.serve<{ sub?: WsSubscriber }>({
         return json(next);
       }
       return new Response('Method not allowed', { status: 405 });
+    }
+    if (url.pathname === '/api/search') {
+      if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 });
+      const body = (await req.json().catch(() => null)) as SearchRequest | null;
+      const q = typeof body?.q === 'string' ? body.q.trim() : '';
+      const allow = Array.isArray(body?.sessionIds) ? new Set(body.sessionIds.map(String)) : undefined;
+      const limit = Math.min(Math.max(Math.trunc(Number(body?.limit)) || 100, 1), 500);
+      return json(runSearch(q, allow, limit));
     }
     const exp = /^\/api\/session\/(.+)\/export$/.exec(url.pathname);
     if (exp) {
@@ -155,6 +174,21 @@ class WsSubscriber implements Subscriber {
       }
     }
   }
+}
+
+/**
+ * Full-text search over in-memory docs. Sessions the background parse hasn't
+ * reached yet are scanned by title only; they mark the response `partial` so
+ * the client can show a "still scanning" state and retry.
+ */
+function runSearch(q: string, allow: Set<string> | undefined, limit: number): SearchResponse {
+  const candidates = store.all().filter(s => !allow || allow.has(s.id));
+  const total = candidates.length;
+  if (!q) return { matches: [], partial: false, scanned: 0, total };
+  const matches = searchDocs(store.searchDocs(), q, allow, limit);
+  const scanned = candidates.filter(s => store.hasSearchDoc(s)).length;
+  const partial = scanned < total || matches.length >= limit;
+  return { matches, partial, scanned, total };
 }
 
 function json(data: unknown, status = 200) {
