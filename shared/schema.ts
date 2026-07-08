@@ -1,5 +1,7 @@
 export type AgentColor = 'gold' | 'cyan' | 'purple' | 'pink' | 'green' | 'red' | 'slate' | string;
 
+export type SessionSource = 'claude' | 'codex' | 'opencode' | 'copilot';
+
 export interface AgentToolStats {
   read?: number;
   edit?: number;
@@ -52,11 +54,13 @@ export interface Settings {
   livenessMs: number;
   pollMs: number;
   contextLimits: Record<string, number>;
+  providers: Record<string, boolean>;
   port: number;
 }
 
 export interface SessionSummary {
   id: string;
+  source: SessionSource;
   project: string;
   projectName: string;
   title: string;

@@ -10,6 +10,7 @@ export const DEFAULT_SETTINGS: Settings = {
   livenessMs: 5 * 60_000,
   pollMs: 1500,
   contextLimits: {},
+  providers: {},
   port: 8787,
 };
 
@@ -66,8 +67,18 @@ function sanitize(s: Settings): Settings {
     livenessMs: clampNum(s.livenessMs, 10_000, 24 * 3600_000, DEFAULT_SETTINGS.livenessMs),
     pollMs: clampNum(s.pollMs, 250, 60_000, DEFAULT_SETTINGS.pollMs),
     contextLimits: s.contextLimits && typeof s.contextLimits === 'object' ? s.contextLimits : {},
+    providers: sanitizeProviders(s.providers),
     port: clampNum(s.port, 1, 65_535, DEFAULT_SETTINGS.port),
   };
+}
+
+function sanitizeProviders(v: unknown): Record<string, boolean> {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
+  const out: Record<string, boolean> = {};
+  for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+    if (typeof val === 'boolean') out[k] = val;
+  }
+  return out;
 }
 
 function clampNum(v: any, lo: number, hi: number, fallback: number): number {
