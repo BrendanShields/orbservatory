@@ -69,3 +69,22 @@ test('agents merge into the snapshot', () => {
   const snap = store.snapshot(state);
   expect(snap.agents.some((a) => a.id === 'session:s1')).toBe(true);
 });
+
+test('setContextLimits live-updates loaded agents that have observed models', () => {
+  const { store, state } = makeStore();
+  const source = { sessionId: 's1', project: 'demo', filePath: '/tmp/s1.jsonl', kind: 'root' as const };
+  const user = state.normalizer.normalizeLine({ type: 'user', timestamp: '2026-07-06T00:00:00.000Z', message: { content: 'x' } }, source);
+  store.merge(state, user.agents, user.events);
+  const assistant = state.normalizer.normalizeLine({ type: 'assistant', timestamp: '2026-07-06T00:00:01.000Z', message: { model: 'claude-custom-model', usage: { input_tokens: 10 }, content: [] } }, source);
+  store.merge(state, assistant.agents, assistant.events);
+  expect(store.snapshot(state).agents.find((a) => a.id === 'session:s1')?.limit).toBe(1_000_000);
+
+  const sub = new CapturingSubscriber();
+  store.addSubscriber(sub);
+  sub.messages = [];
+  store.setContextLimits({ 'claude-custom-model': 123_456 });
+
+  expect(store.snapshot(state).agents.find((a) => a.id === 'session:s1')?.limit).toBe(123_456);
+  const update = sub.events().at(-1);
+  expect(update?.agents?.find((a) => a.id === 'session:s1')?.limit).toBe(123_456);
+});

@@ -242,6 +242,9 @@ function setActive(v: ViewSession) {
     simT = livePinned && v.live ? v.eng.duration : 0;
     selectedId = null;
     renderer.selectedId = null;
+    // Live mission control stays decluttered by default, but replay/imported
+    // sessions should show the completed cast for post-run inspection.
+    showCompleted = !v.live;
   } else if (livePinned && v.live) simT = v.eng.duration;
   renderer.setEngine(v.eng, oldId !== v.id);
   renderer.liveNow = v.live ? v.eng.duration : undefined;

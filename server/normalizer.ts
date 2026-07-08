@@ -85,6 +85,20 @@ export class TranscriptNormalizer {
     this.contextLimits = opts.contextLimits ?? {};
   }
 
+  setContextLimits(limits: Record<string, number>): AwvAgent[] {
+    this.contextLimits = limits ?? {};
+    const changed: AwvAgent[] = [];
+    for (const agent of this.agents.values()) {
+      if (!agent.model) continue;
+      const next = this.limitFor(agent.model);
+      if (agent.limit !== next) {
+        agent.limit = next;
+        changed.push(agent);
+      }
+    }
+    return changed;
+  }
+
   private limitFor(model: string): number {
     return this.contextLimits[model] ?? contextLimitFor(model);
   }
@@ -214,7 +228,7 @@ export class TranscriptNormalizer {
       if (typeof model === 'string' && model && !model.startsWith('<')) {
         const agent = this.agents.get(agentId);
         const lim = this.limitFor(model);
-        if (agent && agent.limit !== lim) { agent.limit = lim; this.markDirty(agentId); }
+        if (agent && (agent.limit !== lim || agent.model !== model)) { agent.limit = lim; agent.model = model; this.markDirty(agentId); }
       }
       const usageTotal = usageTokens(rec.message?.usage ?? rec.usage);
       const toolEvents: Array<Extract<AwvEvent, { type: 'tool' }>> = [];

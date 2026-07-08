@@ -46,6 +46,10 @@ export class SessionStore {
 
   setContextLimits(limits: Record<string, number>) {
     this.contextLimits = limits;
+    for (const state of this.sessions.values()) {
+      const changed = state.normalizer.setContextLimits(limits);
+      if (changed.length) this.merge(state, changed, []);
+    }
   }
 
   upsertSession(meta: { id: string; project: string; sessionId: string; rootFile: string; sessionDir: string; cwd?: string; lastActive: number }): SessionState {
