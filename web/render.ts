@@ -404,16 +404,25 @@ export class VisualRenderer {
   }
 
   private drawNode(T: number, x: CanvasRenderingContext2D, n: NodeState, recent: boolean) {
-    const a=n.a, gone=this.goneFrac(a,T); if(gone>=1)return; const vis=1-gone;
+    const a=n.a, gone=this.goneFrac(a,T); if(gone>=1)return; const vis=1-gone, rr=n.r*this.grow(a,T); if(rr<.5)return;
     const col=colorOf(a), status=statusAt(a,T,this.liveNow), tok=tokensAt(a,T), lim=a.def.limit||1000000, pct=Math.min(1,tok/lim), dim=status==='complete'||status==='idle', pd=this.powerDown(a,T), breathe=(status==='active'&&!this.reduceMotion)?1+.08*Math.sin(T/260+hash(a.id)):1;
-    const halo=n.r*(4.6+(recent?1.6:0))*breathe*this.glow*(dim ? .38 : 1)*vis; if(halo>1)x.drawImage(this.glowSprite(status==='error'?'#ff7a70':col),n.x-halo/2,n.y-halo/2,halo,halo);
-    x.globalAlpha=(status==='idle'?.48:(status==='complete'?.75-pd*.4:1))*vis; x.drawImage(this.orbSprite(status==='error'?'#ff7a70':col,n.r,dim),n.x-n.r,n.y-n.r,n.r*2,n.r*2); x.globalAlpha=1;
-    if(pd>0&&vis>0){x.fillStyle=`rgba(6,16,20,${pd*.66*vis})`;x.beginPath();x.arc(n.x,n.y,n.r,0,7);x.fill();}
-    x.strokeStyle=`rgba(200,230,240,${.13*vis})`; x.lineWidth=1.6; x.beginPath(); x.arc(n.x,n.y,n.r+4.5,0,7); x.stroke();
-    if(pct>.003){x.strokeStyle=ringColor(pct); x.globalAlpha=(dim ? .4 : .95)*(pct>.85&&status==='active'&&!this.reduceMotion? .6+.4*Math.sin(T/130):1)*vis; x.lineWidth=2.4; x.lineCap='round'; x.beginPath(); x.arc(n.x,n.y,n.r+4.5,-Math.PI/2,-Math.PI/2+pct*Math.PI*2); x.stroke(); x.globalAlpha=1; x.lineCap='butt';}
-    if(status==='complete'){x.strokeStyle=`rgba(10,25,30,${.85*(1-pd)})`; x.lineWidth=Math.max(1.6,n.r*.16); x.lineCap='round'; x.beginPath(); x.moveTo(n.x-n.r*.38,n.y+n.r*.02); x.lineTo(n.x-n.r*.1,n.y+n.r*.32); x.lineTo(n.x+n.r*.42,n.y-n.r*.28); x.stroke(); x.lineCap='butt';}
-    if(status==='error'){x.fillStyle='#fff1ef'; x.font=`700 ${Math.max(9,n.r)}px 'JetBrains Mono',monospace`; x.textAlign='center'; x.textBaseline='middle'; x.fillText('!',n.x,n.y+.5);}
-    if(this.selectedId===a.id){x.strokeStyle='rgba(235,250,255,.65)'; x.lineWidth=1.2; x.setLineDash([4,5]); x.lineDashOffset=this.reduceMotion?0:-T/40; x.beginPath(); x.arc(n.x,n.y,n.r+10,0,7); x.stroke(); x.setLineDash([]);}
+    const halo=rr*(4.6+(recent?1.6:0))*breathe*this.glow*(dim ? .38 : 1)*vis; if(halo>1)x.drawImage(this.glowSprite(status==='error'?'#ff7a70':col),n.x-halo/2,n.y-halo/2,halo,halo);
+    x.globalAlpha=(status==='idle'?.48:(status==='complete'?.75-pd*.4:1))*vis; x.drawImage(this.orbSprite(status==='error'?'#ff7a70':col,n.r,dim),n.x-rr,n.y-rr,rr*2,rr*2); x.globalAlpha=1;
+    if(pd>0&&vis>0){x.fillStyle=`rgba(6,16,20,${pd*.66*vis})`;x.beginPath();x.arc(n.x,n.y,rr,0,7);x.fill();}
+    x.strokeStyle=`rgba(200,230,240,${.13*vis})`; x.lineWidth=1.6; x.beginPath(); x.arc(n.x,n.y,rr+4.5,0,7); x.stroke();
+    if(pct>.003){x.strokeStyle=ringColor(pct); x.globalAlpha=(dim ? .4 : .95)*(pct>.85&&status==='active'&&!this.reduceMotion? .6+.4*Math.sin(T/130):1)*vis; x.lineWidth=2.4; x.lineCap='round'; x.beginPath(); x.arc(n.x,n.y,rr+4.5,-Math.PI/2,-Math.PI/2+pct*Math.PI*2); x.stroke(); x.globalAlpha=1; x.lineCap='butt';}
+    if(status==='complete'){x.strokeStyle=`rgba(10,25,30,${.85*(1-pd)})`; x.lineWidth=Math.max(1.6,rr*.16); x.lineCap='round'; x.beginPath(); x.moveTo(n.x-rr*.38,n.y+rr*.02); x.lineTo(n.x-rr*.1,n.y+rr*.32); x.lineTo(n.x+rr*.42,n.y-rr*.28); x.stroke(); x.lineCap='butt';}
+    if(status==='error'){x.fillStyle='#fff1ef'; x.font=`700 ${Math.max(9,rr)}px 'JetBrains Mono',monospace`; x.textAlign='center'; x.textBaseline='middle'; x.fillText('!',n.x,n.y+.5);}
+    if(this.selectedId===a.id){x.strokeStyle='rgba(235,250,255,.65)'; x.lineWidth=1.2; x.setLineDash([4,5]); x.lineDashOffset=this.reduceMotion?0:-T/40; x.beginPath(); x.arc(n.x,n.y,rr+10,0,7); x.stroke(); x.setLineDash([]);}
+  }
+
+  /** Spawn grow-in: 0→1 over 450ms with easeOutBack overshoot; pure function of sim time so scrubbing both directions stays correct. */
+  private grow(a: EngineAgent, t: number): number {
+    const p = (t - a.spawnT) / 450;
+    if (this.reduceMotion || p >= 1) return 1;
+    if (p <= 0) return 0;
+    const q = p - 1, c1 = 1.70158;
+    return 1 + (c1 + 1) * q * q * q + c1 * q * q;
   }
 
   private drawLabels(T: number, x: CanvasRenderingContext2D, w: number, h: number) {
