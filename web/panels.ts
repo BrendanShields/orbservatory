@@ -5,14 +5,16 @@ export function statusMeta(st: string): [string, string] {
   return ({ pending: ['queued', 'rgba(150,200,215,.45)'], active: ['live', '#7adcf2'], idle: ['idle', 'rgba(150,200,215,.45)'], error: ['error', '#ff7a70'], complete: ['done', 'rgba(132,228,192,.75)'] } as any)[st];
 }
 
-export function renderRail(el: HTMLElement, eng: Engine | undefined, t: number, selectedId: string | null, liveNow: number | undefined, onSelect: (id: string) => void) {
+export function renderRail(el: HTMLElement, eng: Engine | undefined, t: number, selectedId: string | null, liveNow: number | undefined, onSelect: (id: string) => void, showCompleted = false, onToggleCompleted?: () => void) {
   if (!eng) { el.innerHTML = `<div class="empty">Waiting for Claude sessions…</div>`; return; }
   let live = 0, done = 0;
   const rows = eng.order.map(id => {
     const a = eng.agents.get(id)!;
     const st = statusAt(a, t, liveNow); if (st === 'active' || st === 'error') live++; if (st === 'complete') done++;
-    // Finished agents leave the rail (still counted in the header); keep the selected one so the inspector stays reachable.
-    if (st === 'complete' && selectedId !== id) return '';
+    // Finished agents leave the rail (still counted in the header) unless the
+    // user opts to keep them — useful when reviewing a replay/history. The
+    // selected agent always stays so the inspector remains reachable.
+    if (st === 'complete' && !showCompleted && selectedId !== id) return '';
     const tok = tokensAt(a, t), pct = Math.min(1, tok / (a.def.limit || 1000000));
     const [label, scol] = statusMeta(st);
     return `<button class="agent-row ${selectedId === id ? 'selected' : ''}" data-agent="${esc(id)}" style="--agent:${colorOf(a)};opacity:${st === 'pending' ? .35 : st === 'complete' ? .62 : 1}">
@@ -21,8 +23,12 @@ export function renderRail(el: HTMLElement, eng: Engine | undefined, t: number, 
       <span class="agent-side"><b style="color:${scol}">${label}</b><em>${st === 'pending' ? '—' : fmt(tok)}</em></span>
     </button>`;
   }).join('');
-  el.innerHTML = `<div class="rail-head"><span>AGENTS</span><b>${live} live · ${done} done · ${eng.order.length} total</b></div>${rows || `<div class="empty">No agents yet.</div>`}`;
+  const toggle = onToggleCompleted
+    ? `<button class="rail-filter ${showCompleted ? 'on' : ''}" data-toggle-completed aria-pressed="${showCompleted}" title="Show completed agents (c)">done</button>`
+    : '';
+  el.innerHTML = `<div class="rail-head"><span>AGENTS</span><b>${live} live · ${done} done · ${eng.order.length} total</b>${toggle}</div>${rows || `<div class="empty">No agents yet.</div>`}`;
   el.querySelectorAll<HTMLButtonElement>('[data-agent]').forEach(btn => btn.onclick = () => onSelect(btn.dataset.agent!));
+  if (onToggleCompleted) { const tb = el.querySelector<HTMLButtonElement>('[data-toggle-completed]'); if (tb) tb.onclick = onToggleCompleted; }
 }
 
 export function renderInspector(el: HTMLElement, eng: Engine | undefined, t: number, selectedId: string | null, liveNow: number | undefined, onSelect: (id: string) => void, onClose: () => void) {

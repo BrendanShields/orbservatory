@@ -38,7 +38,10 @@ export class VisualRenderer {
   edgeStyle: 'beams' | 'wires' = 'beams';
   showGrid = false;
   liveNow?: number;
+  reduceMotion = false;
   sprites: Record<string, HTMLCanvasElement> = {};
+  /** Last rendered simulation time, used as the base for keyboard scrubbing. */
+  private seekAt = 0;
   private down: { x: number; y: number; moved: number; node: NodeState | null; cx: number; cy: number } | null = null;
   private scrub = false;
   onSelect?: (id: string | null) => void;
@@ -66,6 +69,20 @@ export class VisualRenderer {
     canvas.addEventListener('pointerdown', e => { canvas.setPointerCapture(e.pointerId); this.scrub = true; seek(e); });
     canvas.addEventListener('pointermove', e => { if (this.scrub) seek(e); });
     canvas.addEventListener('pointerup', () => { this.scrub = false; });
+    // Keyboard scrubbing: the timeline is exposed as role="slider" tabindex="0".
+    canvas.addEventListener('keydown', e => {
+      if (!this.eng) return;
+      const dur = this.eng.duration, cur = Math.min(dur, Math.max(0, this.seekAt));
+      const stepMs = Math.max(1000, dur * 0.02);
+      let next: number | null = null;
+      if (e.key === 'ArrowRight') next = cur + stepMs;
+      else if (e.key === 'ArrowLeft') next = cur - stepMs;
+      else if (e.key === 'Home') next = 0;
+      else if (e.key === 'End') next = dur;
+      if (next == null) return;
+      e.preventDefault();
+      this.onSeek?.(Math.min(dur, Math.max(0, next)));
+    });
   }
 
   setEngine(eng: Engine, reset = false) {
@@ -89,6 +106,7 @@ export class VisualRenderer {
 
   drawFrame(t: number, dt: number) {
     if (!this.eng) return;
+    this.seekAt = t;
     this.syncNodes(t); this.physics(t, dt); this.updateCam(); this.draw(t); this.drawTL(t);
   }
 
@@ -373,15 +391,15 @@ export class VisualRenderer {
 
   private drawNode(T: number, x: CanvasRenderingContext2D, n: NodeState, recent: boolean) {
     const a=n.a, gone=this.goneFrac(a,T); if(gone>=1)return; const vis=1-gone;
-    const col=colorOf(a), status=statusAt(a,T,this.liveNow), tok=tokensAt(a,T), lim=a.def.limit||1000000, pct=Math.min(1,tok/lim), dim=status==='complete'||status==='idle', pd=this.powerDown(a,T), breathe=status==='active'?1+.08*Math.sin(T/260+hash(a.id)):1;
+    const col=colorOf(a), status=statusAt(a,T,this.liveNow), tok=tokensAt(a,T), lim=a.def.limit||1000000, pct=Math.min(1,tok/lim), dim=status==='complete'||status==='idle', pd=this.powerDown(a,T), breathe=(status==='active'&&!this.reduceMotion)?1+.08*Math.sin(T/260+hash(a.id)):1;
     const halo=n.r*(4.6+(recent?1.6:0))*breathe*this.glow*(dim ? .38 : 1)*vis; if(halo>1)x.drawImage(this.glowSprite(status==='error'?'#ff7a70':col),n.x-halo/2,n.y-halo/2,halo,halo);
     x.globalAlpha=(status==='idle'?.48:(status==='complete'?.75-pd*.4:1))*vis; x.drawImage(this.orbSprite(status==='error'?'#ff7a70':col,n.r,dim),n.x-n.r,n.y-n.r,n.r*2,n.r*2); x.globalAlpha=1;
     if(pd>0&&vis>0){x.fillStyle=`rgba(6,16,20,${pd*.66*vis})`;x.beginPath();x.arc(n.x,n.y,n.r,0,7);x.fill();}
     x.strokeStyle=`rgba(200,230,240,${.13*vis})`; x.lineWidth=1.6; x.beginPath(); x.arc(n.x,n.y,n.r+4.5,0,7); x.stroke();
-    if(pct>.003){x.strokeStyle=ringColor(pct); x.globalAlpha=(dim ? .4 : .95)*(pct>.85&&status==='active'? .6+.4*Math.sin(T/130):1)*vis; x.lineWidth=2.4; x.lineCap='round'; x.beginPath(); x.arc(n.x,n.y,n.r+4.5,-Math.PI/2,-Math.PI/2+pct*Math.PI*2); x.stroke(); x.globalAlpha=1; x.lineCap='butt';}
+    if(pct>.003){x.strokeStyle=ringColor(pct); x.globalAlpha=(dim ? .4 : .95)*(pct>.85&&status==='active'&&!this.reduceMotion? .6+.4*Math.sin(T/130):1)*vis; x.lineWidth=2.4; x.lineCap='round'; x.beginPath(); x.arc(n.x,n.y,n.r+4.5,-Math.PI/2,-Math.PI/2+pct*Math.PI*2); x.stroke(); x.globalAlpha=1; x.lineCap='butt';}
     if(status==='complete'){x.strokeStyle=`rgba(10,25,30,${.85*(1-pd)})`; x.lineWidth=Math.max(1.6,n.r*.16); x.lineCap='round'; x.beginPath(); x.moveTo(n.x-n.r*.38,n.y+n.r*.02); x.lineTo(n.x-n.r*.1,n.y+n.r*.32); x.lineTo(n.x+n.r*.42,n.y-n.r*.28); x.stroke(); x.lineCap='butt';}
     if(status==='error'){x.fillStyle='#fff1ef'; x.font=`700 ${Math.max(9,n.r)}px 'JetBrains Mono',monospace`; x.textAlign='center'; x.textBaseline='middle'; x.fillText('!',n.x,n.y+.5);}
-    if(this.selectedId===a.id){x.strokeStyle='rgba(235,250,255,.65)'; x.lineWidth=1.2; x.setLineDash([4,5]); x.lineDashOffset=-T/40; x.beginPath(); x.arc(n.x,n.y,n.r+10,0,7); x.stroke(); x.setLineDash([]);}
+    if(this.selectedId===a.id){x.strokeStyle='rgba(235,250,255,.65)'; x.lineWidth=1.2; x.setLineDash([4,5]); x.lineDashOffset=this.reduceMotion?0:-T/40; x.beginPath(); x.arc(n.x,n.y,n.r+10,0,7); x.stroke(); x.setLineDash([]);}
   }
 
   private drawLabels(T: number, x: CanvasRenderingContext2D, w: number, h: number) {
