@@ -33,6 +33,10 @@ The app serves the canvas UI and WebSocket API at `http://localhost:8787` by def
 The frontend is bundled from `web/index.html` at boot (no separate build step); a slow or
 occupied port can be changed with `PORT=9876 bun start` or in settings.
 
+The server binds to loopback (`127.0.0.1`) only, so transcript metadata is never
+exposed on your network. To bind more widely (e.g. a remote/dev box), opt in with
+`HOST=0.0.0.0 bun start`.
+
 By default the server scans Claude Code transcripts from `~/.claude/projects`.
 For tests or alternate transcript roots, set:
 
@@ -58,10 +62,15 @@ User settings persist to an OS-appropriate config dir
 `CLAUDE_VIZ_CONFIG_DIR`): palette, layout, grid (off by default), liveness window, poll
 interval, per-model context limits, and port.
 
+All of these are editable from the in-app **⚙ Settings** panel. Palette and layout
+apply instantly; grid, liveness window, poll interval, and per-model context limits
+apply live; a changed port is saved but takes effect on the next restart. Settings
+can also be changed directly via `PUT /api/settings` (see below) or by editing
+`settings.json`.
+
 Useful endpoints:
 
 - `GET /api/health` — readiness probe
 - `GET /api/sessions` — list discovered Claude sessions
 - `GET|PUT /api/settings` — read / update user settings
 - `GET /api/session/<encoded-session-id>/export` — export a session as AWV JSON
-
