@@ -1,5 +1,5 @@
 import type { Engine, EngineAgent } from './engine';
-import { colorOf, fmt, hash, radius, ringColor, statusAt, tokensAt } from './engine';
+import { colorOf, fmt, fmtT, hash, radius, ringColor, statusAt, tokensAt } from './engine';
 
 export type LayoutMode = 'organic' | 'radial' | 'fixed';
 export type PaletteName = 'Deep Teal' | 'Obsidian' | 'Ink Blue' | 'Void Violet' | 'Carbon';
@@ -42,6 +42,9 @@ export class VisualRenderer {
   sprites: Record<string, HTMLCanvasElement> = {};
   /** Last rendered simulation time, used as the base for keyboard scrubbing. */
   private seekAt = 0;
+  /** Timeline hover position as a fraction of duration (duration grows live). */
+  private tlHover: number | null = null;
+  private lastAriaT = -1e9;
   private down: { x: number; y: number; moved: number; node: NodeState | null; cx: number; cy: number; px: number; py: number; pt: number; pvx: number; pvy: number } | null = null;
   private scrub = false;
   onSelect?: (id: string | null) => void;
@@ -66,9 +69,15 @@ export class VisualRenderer {
       const p = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
       this.onSeek?.(p * this.eng.duration);
     };
-    canvas.addEventListener('pointerdown', e => { canvas.setPointerCapture(e.pointerId); this.scrub = true; seek(e); });
-    canvas.addEventListener('pointermove', e => { if (this.scrub) seek(e); });
+    canvas.setAttribute('aria-valuemin', '0');
+    canvas.addEventListener('pointerdown', e => { canvas.setPointerCapture(e.pointerId); this.scrub = true; this.tlHover = null; seek(e); });
+    canvas.addEventListener('pointermove', e => {
+      if (this.scrub) { seek(e); return; }
+      const r = canvas.getBoundingClientRect();
+      this.tlHover = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+    });
     canvas.addEventListener('pointerup', () => { this.scrub = false; });
+    canvas.addEventListener('pointerleave', () => { this.tlHover = null; });
     // Keyboard scrubbing: the timeline is exposed as role="slider" tabindex="0".
     canvas.addEventListener('keydown', e => {
       if (!this.eng) return;
@@ -455,9 +464,22 @@ export class VisualRenderer {
       for(const e of eng.evs){const ex=1+(e.t/dur)*(w-2); ox.fillStyle=({spawn:'#72d6ee',message:'rgba(207,230,238,.55)',tool:'#f3c47e',compact:'#b4a0f2',error:'#ff7a70',retry:'#84e4c0',complete:'#84e4c0'} as any)[e.type]||'rgba(200,220,230,.4)'; ox.fillRect(ex,y-8,1.3,16);}
       ox.globalAlpha=1;
       this.tlCache = { canvas: off, key };
+      cv.setAttribute('aria-valuemax', String(Math.round(dur / 1000)));
     }
     x.drawImage(this.tlCache.canvas, 0, 0, w, h);
     const px=1+(Math.min(dur,Math.max(0,t))/dur)*(w-2), gr=x.createLinearGradient(0,0,px,0); gr.addColorStop(0,'rgba(43,111,133,.55)'); gr.addColorStop(1,'rgba(122,220,242,.75)'); x.fillStyle=gr; x.globalAlpha=.85; x.beginPath(); x.roundRect(1,y-4,Math.max(4,px),8,4); x.fill(); x.globalAlpha=1; x.strokeStyle='rgba(234,247,251,.9)'; x.lineWidth=1.4; x.beginPath(); x.moveTo(px,3); x.lineTo(px,h-3); x.stroke(); x.fillStyle='#eaf7fb'; x.shadowColor='#7adcf2'; x.shadowBlur=8; x.beginPath(); x.arc(px,y,3.4,0,7); x.fill(); x.shadowBlur=0;
+    if (this.tlHover != null && !this.scrub) {
+      const hx = 1 + this.tlHover * (w - 2);
+      x.strokeStyle = 'rgba(234,247,251,.3)'; x.lineWidth = 1; x.beginPath(); x.moveTo(hx, 3); x.lineTo(hx, h - 3); x.stroke();
+      x.font = `500 8.5px 'JetBrains Mono',monospace`; x.fillStyle = 'rgba(234,247,251,.75)';
+      x.textAlign = hx < 40 ? 'left' : hx > w - 40 ? 'right' : 'center'; x.textBaseline = 'top';
+      x.fillText(fmtT(this.tlHover * dur), hx, 1);
+    }
+    if (Math.abs(t - this.lastAriaT) >= 1000) {
+      this.lastAriaT = t;
+      cv.setAttribute('aria-valuenow', String(Math.round(Math.min(dur, Math.max(0, t)) / 1000)));
+      cv.setAttribute('aria-valuetext', fmtT(t));
+    }
   }
 
   private rgb(hex: string): [number, number, number] { if(!hex.startsWith('#')) return [114,214,238]; const n=parseInt(hex.slice(1),16); return [n>>16&255,n>>8&255,n&255]; }

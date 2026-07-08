@@ -21,4 +21,5 @@ html{color-scheme:dark}
 :focus-visible{outline:2px solid #7adcf2;outline-offset:2px}
 button,select,[tabindex]{outline:none}
 #tl:focus-visible{outline-offset:-2px;border-radius:6px}
+#tl{cursor:ew-resize}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}}
