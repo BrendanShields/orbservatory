@@ -1,5 +1,8 @@
-import type { AwvAgent, AwvEvent, AwvSession } from '../shared/schema';
+import type { AwvAgent, AwvEvent, AwvSession, SearchPart, TokenTotals } from '../shared/schema';
 import { hashStr } from '../shared/order';
+
+const SEARCH_PART_MAX = 2000;
+const SEARCH_TOTAL_MAX = 400_000;
 
 export interface TranscriptSource {
   sessionId: string;
@@ -58,6 +61,22 @@ export class TranscriptNormalizer {
   cwd?: string;
   startedAt = 0;
   private lastTs = 0;
+
+  /** Raw billed usage summed per model across every assistant record (deduped by message id). */
+  readonly usageByModel = new Map<string, TokenTotals>();
+  /** Skill invocations (Skill tool) by skill name. */
+  readonly skills: Record<string, number> = {};
+  userTurns = 0;
+  /** Lines that failed to parse as JSON — signals a partial/corrupt transcript. */
+  parseFailures = 0;
+  /** Searchable text extracted during the same parse pass (bounded). */
+  readonly searchParts: SearchPart[] = [];
+  private searchChars = 0;
+  private countedUsageIds = new Set<string>();
+
+  get lastActiveTs(): number {
+    return this.lastTs;
+  }
 
   private agents = new Map<string, AwvAgent>();
   private spawned = new Set<string>();
@@ -155,9 +174,20 @@ export class TranscriptNormalizer {
     return [...this.agents.values()];
   }
 
+  private addSearchPart(f: SearchPart['f'], s: string) {
+    if (this.searchChars >= SEARCH_TOTAL_MAX) return;
+    const text = s.replace(/\s+/g, ' ').trim().slice(0, SEARCH_PART_MAX);
+    if (!text) return;
+    this.searchChars += text.length;
+    this.searchParts.push({ f, s: text });
+  }
+
   normalizeLine(raw: unknown, source: TranscriptSource): NormalizedBatch {
     const line = typeof raw === 'string' ? safeJson(raw) : raw;
-    if (!line || typeof line !== 'object') return { agents: [], events: [] };
+    if (!line || typeof line !== 'object') {
+      if (typeof raw === 'string' && raw.trim()) this.parseFailures++;
+      return { agents: [], events: [] };
+    }
     const rec = line as any;
     const type = String(rec.type || '');
     if (type === 'summary') return { agents: [], events: [], titleChanged: this.setTitle(String(rec.summary ?? ''), 2) };
@@ -216,6 +246,8 @@ export class TranscriptNormalizer {
         if (label) {
           this.setTitle(text, 1);
           this.nameWorkflowAgentFromPrompt(source, agentId, text);
+          if (source.kind === 'root') this.userTurns++;
+          this.addSearchPart('prompt', text);
           maybePush({ t, type: 'message', to: agentId, label });
         }
       }
@@ -229,14 +261,24 @@ export class TranscriptNormalizer {
         const lim = this.limitFor(model);
         if (agent && (agent.limit !== lim || agent.model !== model)) { agent.limit = lim; agent.model = model; this.markDirty(agentId); }
       }
-      const usageTotal = usageTokens(rec.message?.usage ?? rec.usage);
+      const rawUsage = rec.message?.usage ?? rec.usage;
+      const usageTotal = usageTokens(rawUsage);
+      this.accumulateUsage(rec.message?.id, typeof model === 'string' && model && !model.startsWith('<') ? model : undefined, rawUsage);
       const toolEvents: Array<Extract<AwvEvent, { type: 'tool' }>> = [];
       const blocks = contentBlocks(rec.message?.content ?? rec.content);
       for (const block of blocks) {
-        if (!block || typeof block !== 'object' || block.type !== 'tool_use') continue;
+        if (!block || typeof block !== 'object') continue;
+        if (block.type === 'text' && block.text) this.addSearchPart('assistant', String(block.text));
+        if (block.type !== 'tool_use') continue;
         const tool = String(block.name || 'tool');
         const useId = block.id ? String(block.id) : undefined;
         const label = summarizeInput(block.input, tool);
+        this.addSearchPart('tool', `${tool} ${label}`);
+        if (tool === 'Skill' && block.input && typeof block.input === 'object' && block.input.skill) {
+          const skill = String(block.input.skill);
+          this.skills[skill] = (this.skills[skill] || 0) + 1;
+          this.addSearchPart('skill', skill);
+        }
         const ev: Extract<AwvEvent, { type: 'tool' }> = { t: t + toolEvents.length * 30, type: 'tool', agent: agentId, tool, label, useId };
         toolEvents.push(ev);
         if (useId) {
@@ -289,6 +331,28 @@ export class TranscriptNormalizer {
       this.completed.add(awvId);
     }
     return this.finish(agents, events);
+  }
+
+  /**
+   * Sum billed usage per model. Claude Code writes one JSONL line per content
+   * block of a streamed assistant message, each repeating the same message id
+   * and usage — count each API message once.
+   */
+  private accumulateUsage(messageId: unknown, model: string | undefined, usage: any) {
+    if (!usage || typeof usage !== 'object') return;
+    const id = messageId == null ? '' : String(messageId);
+    if (id) {
+      if (this.countedUsageIds.has(id)) return;
+      this.countedUsageIds.add(id);
+    }
+    const key = model || 'unknown';
+    let tot = this.usageByModel.get(key);
+    if (!tot) { tot = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, total: 0 }; this.usageByModel.set(key, tot); }
+    const n = (v: any) => { const x = Number(v); return Number.isFinite(x) ? x : 0; };
+    const input = n(usage.input_tokens), output = n(usage.output_tokens);
+    const cacheRead = n(usage.cache_read_input_tokens), cacheCreation = n(usage.cache_creation_input_tokens);
+    tot.input += input; tot.output += output; tot.cacheRead += cacheRead; tot.cacheCreation += cacheCreation;
+    tot.total += input + output + cacheRead + cacheCreation;
   }
 
   /**
