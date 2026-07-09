@@ -67,6 +67,7 @@ export interface TierThresholds {
 export interface Settings {
   palette: string;
   layout: string;
+  maskProjects: boolean;
   showGrid: boolean;
   showSubagentNames: boolean;
   showOrchestratorName: boolean;

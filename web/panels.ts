@@ -1,6 +1,13 @@
 import type { AgentStatus, Engine, EngineAgent } from './engine';
 import { colorOf, fmt, fmtT, ringColor, statusAt, tokensAt } from './engine';
 import { html, type Html } from './html';
+import { cleanLabel, maskProject } from './privacy';
+
+/** Display name for an agent: paths collapsed everywhere, root project names masked when the privacy mask is on. */
+export function displayName(a: EngineAgent): string {
+  const name = cleanLabel(a.def.name);
+  return a.parent ? name : maskProject(name);
+}
 
 export function statusMeta(st: string): [string, string] {
   return ({ pending: ['queued', 'rgba(150,200,215,.45)'], active: ['live', '#7adcf2'], idle: ['idle', 'rgba(150,200,215,.45)'], error: ['error', '#ff7a70'], complete: ['done', 'rgba(132,228,192,.75)'] } as any)[st];
@@ -90,12 +97,13 @@ export function renderRail(el: HTMLElement, eng: Engine | undefined, t: number, 
     else st.body.insertBefore(row.el, cursor);
     const tok = tokensAt(v.a, t), pct = Math.min(1, tok / (v.a.def.limit || 1000000));
     const [label, scol] = statusMeta(v.status);
+    const name = displayName(v.a);
     const col = colorOf(v.a), width = (pct * 100).toFixed(1) + '%', tokTxt = v.status === 'pending' ? '—' : fmt(tok);
     const op = v.status === 'pending' ? '.35' : v.status === 'complete' ? '.62' : '1';
-    const key = [v.a.def.name, col, width, label, scol, tokTxt, op].join('|');
+    const key = [name, col, width, label, scol, tokTxt, op].join('|');
     if (key !== row.last) {
       row.last = key;
-      row.name.textContent = v.a.def.name;
+      row.name.textContent = name;
       row.el.style.setProperty('--agent', col);
       row.el.style.opacity = op;
       row.meter.style.width = width;
@@ -176,15 +184,19 @@ export function renderInspector(el: HTMLElement, eng: Engine | undefined, t: num
   const status = statusAt(sel, t, liveNow), tok = tokensAt(sel, t), lim = sel.def.limit || 1000000, pct = Math.min(1, tok / lim), [lbl, scol] = statusMeta(status);
   const col = colorOf(sel);
   const src = sourceOf?.(selectedId!);
-  const ktext = dedupeKicker([sel.def.role || 'agent', sel.parent ? 'child of ' + (eng.agents.get(sel.parent)?.def.name || sel.parent) : 'root', src]).toUpperCase();
+  const parentAgent = sel.parent ? eng.agents.get(sel.parent) : undefined;
+  const ktext = dedupeKicker([sel.def.role || 'agent', sel.parent ? 'child of ' + (parentAgent ? displayName(parentAgent) : sel.parent) : 'root', src]).toUpperCase();
   const isRoot = !sel.parent;
-  const taskText = (isRoot && sessionMeta?.cwd && sel.def.task === sessionMeta.cwd && sessionMeta.projectName) ? sessionMeta.projectName : sel.def.task;
-  const head = [ktext, sel.def.name, taskText || '', col].join('|');
+  let taskText = (isRoot && sessionMeta?.cwd && sel.def.task === sessionMeta.cwd && sessionMeta.projectName) ? sessionMeta.projectName : sel.def.task;
+  taskText = taskText && cleanLabel(taskText);
+  if (isRoot && taskText) taskText = maskProject(taskText);
+  const name = displayName(sel);
+  const head = [ktext, name, taskText || '', col].join('|');
   if (last.head !== head) {
     last.head = head;
     R.head.style.setProperty('--agent', col);
     R.kickerText.nodeValue = ktext;
-    R.h2.textContent = sel.def.name;
+    R.h2.textContent = name;
     R.task.textContent = taskText || 'No task metadata available.';
   }
   setHtml('logChips', R.logChips, html`${(['all', 'tools', 'messages', 'errors'] as const).map(k => html`<button data-logf="${k}" class="${k === st.logKind ? 'on' : ''}" aria-pressed="${k === st.logKind}">${k}</button>`)}`);
@@ -209,9 +221,10 @@ export function renderInspector(el: HTMLElement, eng: Engine | undefined, t: num
     if (e.t > t) continue;
     if (!logFilter(st.logKind, e)) continue;
     const time = fmtT(e.t);
-    if (e.type === 'spawn') log.push(logRow(time, 'SPAWN', '#72d6ee', sel.parent ? `spawned by ${eng.agents.get(sel.parent)?.def.name || sel.parent}` : 'session started', `+${fmt(e.tokens || 0)}`));
-    else if (e.type === 'message' && e.to === sel.id) log.push(logRow(time, '◀ RECV', '#aee8f7', `${e.label || 'message'}${e.from ? ' — from ' + (eng.agents.get(e.from)?.def.name || e.from) : ' — external'}`, `+${fmt(e.tokens || 0)}`));
-    else if (e.type === 'message' && e.from === sel.id && e.to !== sel.id) log.push(logRow(time, 'SEND ▶', 'rgba(207,230,238,.8)', `${e.label || 'message'} — to ${eng.agents.get(e.to || '')?.def.name || e.to}`, ''));
+    const nameOf = (id: string | undefined) => { const a = id ? eng.agents.get(id) : undefined; return a ? displayName(a) : id; };
+    if (e.type === 'spawn') log.push(logRow(time, 'SPAWN', '#72d6ee', sel.parent ? `spawned by ${nameOf(sel.parent)}` : 'session started', `+${fmt(e.tokens || 0)}`));
+    else if (e.type === 'message' && e.to === sel.id) log.push(logRow(time, '◀ RECV', '#aee8f7', `${e.label || 'message'}${e.from ? ' — from ' + nameOf(e.from) : ' — external'}`, `+${fmt(e.tokens || 0)}`));
+    else if (e.type === 'message' && e.from === sel.id && e.to !== sel.id) log.push(logRow(time, 'SEND ▶', 'rgba(207,230,238,.8)', `${e.label || 'message'} — to ${nameOf(e.to || '')}`, ''));
     else if (e.type === 'message' && e.from === sel.id) log.push(logRow(time, 'REPLY', 'rgba(207,230,238,.8)', e.label || 'assistant reply', `+${fmt(e.tokens || 0)}`));
     else if (e.type === 'tool') log.push(logRow(time, 'TOOL', '#f3c47e', `${e.tool}${e.label ? ' — ' + e.label : ''}`, `+${fmt(e.tokens || 0)}`));
     else if (e.type === 'compact') log.push(logRow(time, 'COMPACT', '#b4a0f2', e.label || 'context compacted', `−${fmt((e as any)._drop || 0)}`));
@@ -236,7 +249,7 @@ function runStats(a: import('../shared/schema').AwvAgent): Html {
   if (ts && (ts.linesAdded || ts.linesRemoved)) cells.push(cell('lines', `+${ts.linesAdded || 0} −${ts.linesRemoved || 0}`));
   if (a.model) cells.push(cell('model', a.model.replace(/^claude-/, '')));
   if (!cells.length && !a.result) return html``;
-  return html`<div class="run-stats">${cells}</div>${a.result ? html`<p class="task run-result">${a.result}</p>` : ''}`;
+  return html`<div class="run-stats">${cells}</div>${a.result ? html`<p class="task run-result">${cleanLabel(a.result)}</p>` : ''}`;
 }
 
 function cell(label: string, value: string): Html {
@@ -253,9 +266,9 @@ function fmtDur(ms: number): string {
 
 function childRow(a: EngineAgent, t: number, liveNow: number | undefined): Html {
   const st = statusAt(a, t, liveNow), pct = Math.min(1, tokensAt(a, t) / (a.def.limit || 1000000)), [label, scol] = statusMeta(st);
-  return html`<button class="child-row" data-child="${a.id}" style="--agent:${colorOf(a)}"><span></span><b>${a.def.name}</b><em style="color:${scol}">${label} · ${(pct * 100).toFixed(0)}%</em></button>`;
+  return html`<button class="child-row" data-child="${a.id}" style="--agent:${colorOf(a)}"><span></span><b>${displayName(a)}</b><em style="color:${scol}">${label} · ${(pct * 100).toFixed(0)}%</em></button>`;
 }
 
 function logRow(time: string, tag: string, color: string, text: string, delta: string): Html {
-  return html`<div class="log-row"><time>${time}</time><b style="color:${color}">${tag}</b><span>${text}</span><em>${delta}</em></div>`;
+  return html`<div class="log-row"><time>${time}</time><b style="color:${color}">${tag}</b><span>${cleanLabel(text)}</span><em>${delta}</em></div>`;
 }

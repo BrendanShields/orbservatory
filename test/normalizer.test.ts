@@ -45,6 +45,22 @@ test('peekLine extracts cwd, title, and start time without events', () => {
   expect(n.getAgents()).toEqual([]);
 });
 
+test('labels render paths relative to cwd; root task and desc carry no cwd', () => {
+  const n = new TranscriptNormalizer({ sessionId: 's1', project: '-Users-b-dev-demo' });
+  n.normalizeLine({ type: 'user', timestamp: '2026-07-06T00:00:00.000Z', cwd: '/Users/b/dev/demo', message: { content: 'go' } }, rootSource);
+  const b = n.normalizeLine({ type: 'assistant', timestamp: '2026-07-06T00:00:01.000Z', message: { usage: { input_tokens: 10 }, content: [
+    { type: 'tool_use', id: 't1', name: 'Read', input: { file_path: '/Users/b/dev/demo/src/main.ts' } },
+    { type: 'tool_use', id: 't2', name: 'Edit', input: { file_path: '/Users/b/elsewhere/x.ts' } },
+  ] } }, rootSource);
+  expect((b.events[0] as any).label).toBe('file_path: src/main.ts');
+  expect((b.events[1] as any).label).toBe('file_path: x.ts');
+  const snap = n.snapshot([]);
+  expect(snap.desc).toBe('demo · s1');
+  const root = snap.agents.find(a => a.role === 'root')!;
+  expect(root.task).toBe('demo');
+  expect(JSON.stringify({ d: snap.desc, t: root.task })).not.toContain('/Users');
+});
+
 test('context limit defaults to 1M and adapts to the observed model', () => {
   const n = new TranscriptNormalizer({ sessionId: 's1', project: 'demo' });
   n.normalizeLine({ type: 'user', timestamp: '2026-07-06T00:00:00.000Z', message: { content: 'x' } }, rootSource);

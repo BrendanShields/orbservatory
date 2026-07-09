@@ -9,6 +9,7 @@ import { html, raw } from './html';
 import { Transport, searchServer, putSettings } from './transport';
 import { SettingsModal } from './settingsModal';
 import { setupImport, exportSession } from './importer';
+import { setMask, maskProject } from './privacy';
 
 
 interface ViewSession { id: string; awv: AwvSession; eng: Engine; live: boolean; lastIndex: number; startMs: number }
@@ -115,6 +116,7 @@ palette.bindActive(() => active ? { eng: active.eng, selectedId } : null);
 palette.bindCommands(() => [
   { id: 'import', label: 'Import session…', run: () => fileInput.click() },
   { id: 'export', label: 'Export session', disabled: !active, run: () => { if (active) exportSession(active.awv); } },
+  { id: 'mask', label: `Toggle privacy mask (${serverSettings?.maskProjects ? 'on' : 'off'})`, run: () => putSettings({ maskProjects: !serverSettings?.maskProjects }) },
   { id: 'settings', label: 'Settings', run: () => settingsModal.toggle() },
 ]);
 const settingsModal = new SettingsModal(document.getElementById('settingsModal')!, (open) => setGraphInert(open || palette.isOpen));
@@ -283,9 +285,14 @@ function applyServerSettings(s: Settings) {
   renderer.showGrid = !!s.showGrid;
   renderer.showSubagentNames = s.showSubagentNames !== false;
   renderer.showOrchestratorName = s.showOrchestratorName !== false;
+  const maskChanged = maskWas !== s.maskProjects;
+  maskWas = s.maskProjects;
+  setMask(!!s.maskProjects);
   settingsModal.setSettings(s);
+  if (maskChanged) { delete titleBtn.dataset.key; updateChrome(); }
   scheduleHome();
 }
+let maskWas = false;
 
 // ---------- active session ----------
 
@@ -412,6 +419,7 @@ function updateChrome(render = true) {
   } else {
     title = transport.open ? 'No session — ⌘K to switch' : 'Connecting…';
   }
+  project = maskProject(project);
   const key = [project, title, liveDot].join('|');
   if (titleBtn.dataset.key !== key) {
     titleBtn.dataset.key = key;

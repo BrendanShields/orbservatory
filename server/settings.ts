@@ -7,6 +7,7 @@ import { DEFAULT_TIER_THRESHOLDS } from './stats';
 export const DEFAULT_SETTINGS: Settings = {
   palette: 'Deep Teal',
   layout: 'organic',
+  maskProjects: false,
   showGrid: false,
   showSubagentNames: true,
   showOrchestratorName: true,
@@ -68,6 +69,7 @@ function sanitize(s: Settings): Settings {
   return {
     palette: String(s.palette || DEFAULT_SETTINGS.palette),
     layout: String(s.layout || DEFAULT_SETTINGS.layout),
+    maskProjects: Boolean(s.maskProjects),
     showGrid: Boolean(s.showGrid),
     showSubagentNames: s.showSubagentNames !== false,
     showOrchestratorName: s.showOrchestratorName !== false,

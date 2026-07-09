@@ -131,7 +131,7 @@ export class TranscriptNormalizer {
   snapshot(events: AwvEvent[]): AwvSession {
     return {
       name: this.title,
-      desc: `${this.projectName} · ${this.cwd || decodeProjectName(this.project)} · ${this.sessionId.slice(0, 8)}`,
+      desc: `${this.projectName} · ${this.sessionId.slice(0, 8)}`,
       agents: [...this.agents.values()],
       // Events arrive pre-sorted from the store; keep them as-is so indexes stay stable.
       events: events.slice(),
@@ -197,7 +197,7 @@ export class TranscriptNormalizer {
     if (rec.cwd && !this.cwd) {
       this.cwd = rec.cwd;
       const root = this.agents.get(rootAgentId(this.sessionId));
-      if (root) { root.name = truncate(this.projectName, 54); root.task = this.cwd; }
+      if (root) { root.name = truncate(this.projectName, 54); root.task = this.projectName; }
     }
     this.dirty.clear();
     const { ts, t } = this.clock(rec);
@@ -272,7 +272,7 @@ export class TranscriptNormalizer {
         if (block.type !== 'tool_use') continue;
         const tool = String(block.name || 'tool');
         const useId = block.id ? String(block.id) : undefined;
-        const label = summarizeInput(block.input, tool);
+        const label = summarizeInput(block.input, tool, this.cwd);
         this.addSearchPart('tool', `${tool} ${label}`);
         if (tool === 'Skill' && block.input && typeof block.input === 'object' && block.input.skill) {
           const skill = String(block.input.skill);
@@ -379,7 +379,7 @@ export class TranscriptNormalizer {
       const agentId = rootAgentId(this.sessionId);
       this.cwd = this.cwd || source.cwd || rec.cwd;
       if (!this.agents.has(agentId)) {
-        const agent: AwvAgent = { id: agentId, name: truncate(this.projectName, 54), color: 'cyan', limit: this.contextLimit, task: this.cwd || decodeProjectName(source.project), role: 'root', source: 'transcript' };
+        const agent: AwvAgent = { id: agentId, name: truncate(this.projectName, 54), color: 'cyan', limit: this.contextLimit, task: this.projectName, role: 'root', source: 'transcript' };
         this.agents.set(agentId, agent);
         if (!this.spawned.has(agentId)) { this.spawned.add(agentId); (agent as any).__spawn = { t, ts }; }
       }
@@ -544,7 +544,8 @@ export class TranscriptNormalizer {
     const id = rootAgentId(this.sessionId);
     let root = this.agents.get(id);
     if (!root) {
-      root = { id, name: truncate(this.projectName, 54), color: 'cyan', limit: this.contextLimit, task: source.cwd || this.cwd || decodeProjectName(source.project), role: 'root', source: 'transcript' };
+      this.cwd = this.cwd || source.cwd;
+      root = { id, name: truncate(this.projectName, 54), color: 'cyan', limit: this.contextLimit, task: this.projectName, role: 'root', source: 'transcript' };
       this.agents.set(id, root);
       if (!this.spawned.has(id)) {
         this.spawned.add(id);
@@ -648,18 +649,29 @@ function usageTokens(usage: any): number | null {
   return seen ? total : null;
 }
 
-function summarizeInput(input: any, tool?: string): string {
+/** Paths render relative to the session cwd (foreign paths collapse to their basename) so labels and exports never carry absolute paths. */
+export function relPath(p: string, cwd?: string): string {
+  if (!p.startsWith('/') && !p.startsWith('~')) return p;
+  if (cwd && p === cwd) return p.split('/').filter(Boolean).pop() || p;
+  if (cwd && p.startsWith(cwd.endsWith('/') ? cwd : cwd + '/')) return p.slice(cwd.length + (cwd.endsWith('/') ? 0 : 1));
+  return p.split('/').filter(Boolean).pop() || p;
+}
+
+const PATH_KEYS = new Set(['file_path', 'path']);
+
+function summarizeInput(input: any, tool?: string, cwd?: string): string {
   if (input == null) return '';
   if (typeof input === 'string') return truncate(input, 90);
   if (typeof input !== 'object') return truncate(String(input), 90);
   if ((tool === 'Agent' || tool === 'Task') && (input.subagent_type || input.description)) {
     return truncate(`${input.subagent_type || 'agent'}${input.description ? `: ${input.description}` : ''}`, 90);
   }
+  const val = (k: string, v: any) => PATH_KEYS.has(k) ? relPath(String(v), cwd) : String(v);
   const preferred = ['description', 'prompt', 'command', 'file_path', 'path', 'pattern', 'query', 'url'];
   for (const key of preferred) {
-    if (input[key] != null) return `${key}: ${truncate(String(input[key]), 74)}`;
+    if (input[key] != null) return `${key}: ${truncate(val(key, input[key]), 74)}`;
   }
-  const entries = Object.entries(input).slice(0, 3).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`);
+  const entries = Object.entries(input).slice(0, 3).map(([k, v]) => `${k}: ${typeof v === 'string' ? val(k, v) : JSON.stringify(v)}`);
   return truncate(entries.join(', '), 90);
 }
 

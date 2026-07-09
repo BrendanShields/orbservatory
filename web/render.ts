@@ -1,6 +1,7 @@
 import type { Engine, EngineAgent } from './engine';
 import { colorOf, fmt, fmtT, hash, radius, ringColor, statusAt, tokensAt } from './engine';
 import type { AwvEvent } from '../shared/schema';
+import { cleanLabel, maskProject } from './privacy';
 
 export type LayoutMode = 'organic' | 'radial' | 'fixed';
 export type PaletteName = 'Deep Teal' | 'Obsidian' | 'Ink Blue' | 'Void Violet' | 'Carbon';
@@ -544,12 +545,12 @@ export class VisualRenderer {
       if(!showName&&!showTok)continue;
       const status=statusAt(a,T,this.liveNow), tok=tokensAt(a,T), lim=a.def.limit||1000000, pct=Math.min(1,tok/lim), fs=Math.max(8.5,Math.min(13,11*Math.sqrt(s)));
       x.textAlign='center'; x.textBaseline='alphabetic'; x.shadowColor='rgba(4,13,17,.9)'; x.shadowBlur=4;
-      if(showName){x.font=`500 ${fs}px Outfit,sans-serif`; x.fillStyle=status==='complete'||status==='idle'?'rgba(190,215,224,.5)':'rgba(224,242,248,.92)'; x.fillText(a.def.name,sx,sy-(n.r+10)*s-4);}
+      if(showName){const nm=a.parent?cleanLabel(a.def.name):maskProject(cleanLabel(a.def.name)); x.font=`500 ${fs}px Outfit,sans-serif`; x.fillStyle=status==='complete'||status==='idle'?'rgba(190,215,224,.5)':'rgba(224,242,248,.92)'; x.fillText(nm,sx,sy-(n.r+10)*s-4);}
       if(showTok){x.font=`500 ${Math.max(7.5,fs*.78)}px 'JetBrains Mono',monospace`; x.fillStyle=pct>.85?'rgba(255,150,140,.9)':'rgba(150,200,215,.75)'; x.fillText(`${fmt(tok)} · ${Math.round(pct*100)}%`,sx,sy+(n.r+9)*s+11);} x.shadowBlur=0;
     }
     x.textAlign='center';
     const evs=this.eng.evs;
-    for(let i=this.evLowerBound(T-1700);i<evs.length;i++){const e=evs[i];if(e.t>T)break; const age=T-e.t;if(age>1700)continue; const id=('agent'in e&&e.agent)||(e as any).to; const n=id&&this.nodes.get(id); if(!n)continue; const pr=age/1700, sx=(n.x-cam.x)*s+w/2, sy=(n.y-cam.y)*s+h/2-(n.r+16)*s-14-pr*16; let txt='', col='#f3c47e'; if(e.type==='tool')txt='⚙ '+e.tool; else if(e.type==='compact'){txt='⇣ compact'; col='#b4a0f2';} else if(e.type==='error'){txt='✕ '+(e.label||'error'); col='#ff7a70';} else if(e.type==='retry'){txt='↻ retry'; col='#84e4c0';} if(!txt)continue; x.globalAlpha=Math.min(1,(1-pr)*1.6); x.font=`500 9.5px 'JetBrains Mono',monospace`; x.shadowColor='rgba(4,13,17,.95)'; x.shadowBlur=4; x.fillStyle=col; x.fillText(txt,sx,sy); x.shadowBlur=0; x.globalAlpha=1;}
+    for(let i=this.evLowerBound(T-1700);i<evs.length;i++){const e=evs[i];if(e.t>T)break; const age=T-e.t;if(age>1700)continue; const id=('agent'in e&&e.agent)||(e as any).to; const n=id&&this.nodes.get(id); if(!n)continue; const pr=age/1700, sx=(n.x-cam.x)*s+w/2, sy=(n.y-cam.y)*s+h/2-(n.r+16)*s-14-pr*16; let txt='', col='#f3c47e'; if(e.type==='tool')txt='⚙ '+e.tool; else if(e.type==='compact'){txt='⇣ compact'; col='#b4a0f2';} else if(e.type==='error'){txt='✕ '+cleanLabel(e.label||'error'); col='#ff7a70';} else if(e.type==='retry'){txt='↻ retry'; col='#84e4c0';} if(!txt)continue; x.globalAlpha=Math.min(1,(1-pr)*1.6); x.font=`500 9.5px 'JetBrains Mono',monospace`; x.shadowColor='rgba(4,13,17,.95)'; x.shadowBlur=4; x.fillStyle=col; x.fillText(txt,sx,sy); x.shadowBlur=0; x.globalAlpha=1;}
   }
 
   private tlCache: { canvas: HTMLCanvasElement; key: string } | null = null;

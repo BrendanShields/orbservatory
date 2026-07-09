@@ -6,6 +6,7 @@ import {
   aggregate, buildRows, facetOptions, filterRows, sortRows,
 } from './homeModel';
 import { cacheSplitBar, chipList, fmtDur, fmtTokens, fmtUsd, relTime, tierBadge, tile } from './stats-viz';
+import { maskProject } from './privacy';
 
 const compactFiltersMq = window.matchMedia('(max-width: 760px)');
 
@@ -147,10 +148,11 @@ export class HomeView {
     const f = facetOptions(rows);
     const sel = (id: string, label: string, cur: string, opts: string[]) => {
       const seen = opts.includes(cur) || cur === 'all';
+      const show = (o: string) => id === 'project' ? maskProject(o) : o;
       return html`<select class="select compact facet" data-facet="${id}" aria-label="Filter by ${label}">
         <option value="all">${label}: all</option>
-        ${seen ? '' : html`<option value="${cur}" selected>${cur}</option>`}
-        ${opts.map((o) => html`<option value="${o}"${o === cur ? raw(' selected') : ''}>${o}</option>`)}
+        ${seen ? '' : html`<option value="${cur}" selected>${show(cur)}</option>`}
+        ${opts.map((o) => html`<option value="${o}"${o === cur ? raw(' selected') : ''}>${show(o)}</option>`)}
       </select>`;
     };
     this.els.facets.innerHTML = html`${[
@@ -221,7 +223,7 @@ export class HomeView {
         ? html`${shortModel(stats.models[stats.models.length - 1])}${stats.models.length > 1 ? ` +${stats.models.length - 1}` : ''}`
         : SKEL;
       return html`<tr class="srow" data-id="${sum.id}" tabindex="0" role="link" aria-label="Open session ${title}">
-        <td class="t-title"><b>${title}</b><span>${sum.projectName || sum.project} · ${sum.source}</span></td>
+        <td class="t-title"><b>${title}</b><span>${maskProject(sum.projectName || sum.project)} · ${sum.source}</span></td>
         <td class="t-when" title="${new Date(stats?.lastActive || sum.lastActive).toLocaleString()}">${relTime(stats?.lastActive || sum.lastActive)}</td>
         <td>${sk(stats && (stats.durationMs >= 3_600_000 ? fmtDur(stats.durationMs) : fmtT(stats.durationMs)))}</td>
         <td>${tierBadge(stats)}</td>

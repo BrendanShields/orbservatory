@@ -50,6 +50,9 @@ export class SettingsModal {
     this.el.innerHTML = `<div class="modal-card">
       <button class="close" id="settingsClose" aria-label="Close settings" title="Close">×</button>
       <h2>Settings</h2>
+      <h3 class="set-head">Privacy</h3>
+      <label class="set-row"><input type="checkbox" id="setMask" ${s.maskProjects ? 'checked' : ''}><span>Mask project names <em>(display-only aliases for screen sharing)</em></span></label>
+      <h3 class="set-head">Graph</h3>
       <label class="set-row"><input type="checkbox" id="setGrid" ${s.showGrid ? 'checked' : ''}><span>Show background grid</span></label>
       <label class="set-row"><input type="checkbox" id="setSubNames" ${s.showSubagentNames !== false ? 'checked' : ''}><span>Show sub-agent names <em>(hover always shows)</em></span></label>
       <label class="set-row"><input type="checkbox" id="setOrchName" ${s.showOrchestratorName !== false ? 'checked' : ''}><span>Show orchestrator name <em>(hover always shows)</em></span></label>
@@ -71,6 +74,7 @@ export class SettingsModal {
     const el = this.el;
     const err = el.querySelector<HTMLElement>('#setErr')!;
     err.hidden = true;
+    const mask = el.querySelector<HTMLInputElement>('#setMask')!.checked;
     const grid = el.querySelector<HTMLInputElement>('#setGrid')!.checked;
     const subNames = el.querySelector<HTMLInputElement>('#setSubNames')!.checked;
     const orchName = el.querySelector<HTMLInputElement>('#setOrchName')!.checked;
@@ -115,7 +119,7 @@ export class SettingsModal {
     const providers: Record<string, boolean> = {};
     el.querySelectorAll<HTMLInputElement>('.setProv').forEach(cb => { providers[cb.dataset.src!] = cb.checked; });
     // Server sanitises and re-broadcasts; the WS 'settings' message updates our UI.
-    putSettings({ showGrid: grid, showSubagentNames: subNames, showOrchestratorName: orchName, livenessMs: Math.round(livenessMin * 60000), pollMs, port, contextLimits, pricing, providers });
+    putSettings({ maskProjects: mask, showGrid: grid, showSubagentNames: subNames, showOrchestratorName: orchName, livenessMs: Math.round(livenessMin * 60000), pollMs, port, contextLimits, pricing, providers });
     this.close();
   }
 }

@@ -3,6 +3,7 @@ import type { Engine } from './engine';
 import { colorOf, statusAt } from './engine';
 import { html, raw } from './html';
 import { relTime, tierBadge } from './stats-viz';
+import { cleanLabel, maskProject } from './privacy';
 
 export interface PaletteCallbacks {
   onOpen(id: string): void;
@@ -137,7 +138,7 @@ export class Palette {
     if (!act) return [];
     return [...act.eng.agents.values()].map((a) => ({
       id: a.id,
-      name: a.def.name,
+      name: a.parent ? cleanLabel(a.def.name) : maskProject(cleanLabel(a.def.name)),
       task: a.def.task,
       status: statusAt(a, act.eng.duration),
       color: colorOf(a),
@@ -222,7 +223,7 @@ export class Palette {
     if (r.kind === 'session') {
       return html`<div ${raw(base)} class="palette-row${sel ? ' sel' : ''}">
         <span class="p-dot${r.sum.live ? ' live' : ''}"></span>
-        <span class="p-main"><b>${r.sum.title || r.sum.id.slice(0, 8)}</b><span>${r.sum.projectName || r.sum.project} · ${relTime(r.sum.lastActive)}</span>${r.snippet ? html`<em class="p-snip">${r.field || ''}: ${r.snippet}</em>` : ''}</span>
+        <span class="p-main"><b>${r.sum.title || r.sum.id.slice(0, 8)}</b><span>${maskProject(r.sum.projectName || r.sum.project)} · ${relTime(r.sum.lastActive)}</span>${r.snippet ? html`<em class="p-snip">${r.field || ''}: ${cleanLabel(r.snippet)}</em>` : ''}</span>
         ${tierBadge(r.stats)}
       </div>`;
     }
