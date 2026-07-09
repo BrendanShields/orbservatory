@@ -1,5 +1,5 @@
 import type { SessionStats, SessionTier, TokenTotals } from '../shared/schema';
-import { esc } from './panels';
+import { html, type Html } from './html';
 
 /** 1234 → "1.2k", 5_600_000 → "5.6M". Tokens are glanceable, not precise. */
 export function fmtTokens(n: number): string {
@@ -40,32 +40,30 @@ const TIER_LETTER: Record<SessionTier, string> = { simple: 'S', moderate: 'M', c
  * Tier badge. Raw driving numbers ride along in the tooltip so the badge is
  * never a black box (the table also shows subagents/tools as columns).
  */
-export function tierBadge(stats: SessionStats | undefined): string {
-  if (!stats) return `<span class="tier-badge pending" title="Analysing…">·</span>`;
+export function tierBadge(stats: SessionStats | undefined): Html {
+  if (!stats) return html`<span class="tier-badge pending" title="Analysing…">·</span>`;
   const t = stats.tier;
   const why = `${stats.subagentCount} subagents · ${stats.toolCalls} tool calls · ${stats.compactions} compactions`;
-  const partial = stats.partial ? ' partial' : '';
-  return `<span class="tier-badge ${t}${partial}" title="${esc(t)} — ${esc(why)}${stats.partial ? ' · incomplete transcript' : ''}">${TIER_LETTER[t]}<i>${esc(t)}</i></span>`;
+  return html`<span class="tier-badge ${t}${stats.partial ? ' partial' : ''}" title="${t} — ${why}${stats.partial ? ' · incomplete transcript' : ''}">${TIER_LETTER[t]}<i>${t}</i></span>`;
 }
 
-/** Aggregate-strip tile. `sub` is a small secondary line (already-escaped HTML allowed via `subHtml`). */
-export function tile(label: string, value: string, opts: { sub?: string; subHtml?: string; accent?: string } = {}): string {
-  const sub = opts.subHtml ?? (opts.sub ? esc(opts.sub) : '');
-  return `<div class="tile${opts.accent ? ` ${opts.accent}` : ''}"><span class="tile-v">${esc(value)}</span><span class="tile-l">${esc(label)}</span>${sub ? `<span class="tile-s">${sub}</span>` : ''}</div>`;
+/** Aggregate-strip tile. `sub` is a small secondary line. */
+export function tile(label: string, value: string, opts: { sub?: string | Html; accent?: string } = {}): Html {
+  return html`<div class="tile${opts.accent ? ` ${opts.accent}` : ''}"><span class="tile-v">${value}</span><span class="tile-l">${label}</span>${opts.sub ? html`<span class="tile-s">${opts.sub}</span>` : ''}</div>`;
 }
 
 /** Stacked cache-split bar: input / output / cache-read / cache-creation. */
-export function cacheSplitBar(t: TokenTotals): string {
-  if (!t.total) return '';
+export function cacheSplitBar(t: TokenTotals): Html {
+  if (!t.total) return html``;
   const seg = (n: number, cls: string, name: string) => {
     const pct = (n / t.total) * 100;
-    return pct < 0.5 ? '' : `<i class="${cls}" style="width:${pct.toFixed(1)}%" title="${name}: ${fmtTokens(n)}"></i>`;
+    return pct < 0.5 ? '' : html`<i class="${cls}" style="width:${pct.toFixed(1)}%" title="${name}: ${fmtTokens(n)}"></i>`;
   };
-  return `<span class="split-bar" role="img" aria-label="in ${fmtTokens(t.input)}, out ${fmtTokens(t.output)}, cache read ${fmtTokens(t.cacheRead)}, cache write ${fmtTokens(t.cacheCreation)}">${seg(t.input, 'in', 'input')}${seg(t.output, 'out', 'output')}${seg(t.cacheRead, 'cr', 'cache read')}${seg(t.cacheCreation, 'cc', 'cache write')}</span>`;
+  return html`<span class="split-bar" role="img" aria-label="in ${fmtTokens(t.input)}, out ${fmtTokens(t.output)}, cache read ${fmtTokens(t.cacheRead)}, cache write ${fmtTokens(t.cacheCreation)}">${seg(t.input, 'in', 'input')}${seg(t.output, 'out', 'output')}${seg(t.cacheRead, 'cr', 'cache read')}${seg(t.cacheCreation, 'cc', 'cache write')}</span>`;
 }
 
 /** Small ranked chip list for top skills / tools / models. */
-export function chipList(items: [string, number][], fmt: (n: number) => string = String): string {
-  if (!items.length) return '<span class="chip none">—</span>';
-  return items.map(([name, n]) => `<span class="chip" title="${esc(name)}: ${esc(fmt(n))}">${esc(name)}<b>${esc(fmt(n))}</b></span>`).join('');
+export function chipList(items: [string, number][], fmt: (n: number) => string = String): Html {
+  if (!items.length) return html`<span class="chip none">—</span>`;
+  return html`${items.map(([name, n]) => html`<span class="chip" title="${name}: ${fmt(n)}">${name}<b>${fmt(n)}</b></span>`)}`;
 }

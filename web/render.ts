@@ -22,6 +22,9 @@ const REMOVE_FADE_MS = 800;
 const TICK_COLOR: Record<string, string> = { spawn: '#72d6ee', message: 'rgba(207,230,238,.55)', tool: '#f3c47e', compact: '#b4a0f2', error: '#ff7a70', retry: '#84e4c0', complete: '#84e4c0' };
 const LENS_R = 60;
 const LENS_MAG = 2.5;
+const NODE_HIT_RADIUS_PX = 22;
+const DRAG_THRESHOLD_PX = 10;
+const TL_SNAP_PX = 8;
 
 export class VisualRenderer {
   canvas: HTMLCanvasElement;
@@ -56,7 +59,22 @@ export class VisualRenderer {
   private tlPointer: number | null = null;
   private lensAmt = 0;
   private lastAriaT = -1e9;
-  private down: { x: number; y: number; moved: number; node: NodeState | null; cx: number; cy: number; px: number; py: number; pt: number; pvx: number; pvy: number } | null = null;
+  private down: {
+    x: number;
+    y: number;
+    moved: number;
+    dragging: boolean;
+    node: NodeState | null;
+    nodeDx: number;
+    nodeDy: number;
+    cx: number;
+    cy: number;
+    px: number;
+    py: number;
+    pt: number;
+    pvx: number;
+    pvy: number;
+  } | null = null;
   private scrub = false;
   onSelect?: (id: string | null) => void;
   onSeek?: (t: number) => void;
@@ -80,6 +98,7 @@ export class VisualRenderer {
     canvas.parentElement?.append(this.tip);
     const frac = (e: PointerEvent) => {
       const r = canvas.getBoundingClientRect();
+      if (r.width <= 0) return 0;
       return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
     };
     const seek = (e: PointerEvent) => {
@@ -88,13 +107,24 @@ export class VisualRenderer {
       this.onSeek?.(this.nearestEvent(t, canvas.getBoundingClientRect().width)?.t ?? t);
     };
     canvas.setAttribute('aria-valuemin', '0');
-    canvas.addEventListener('pointerdown', e => { canvas.setPointerCapture(e.pointerId); this.scrub = true; this.tlHover = null; this.tlPointer = frac(e); seek(e); });
+    canvas.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      canvas.focus({ preventScroll: true });
+      canvas.setPointerCapture(e.pointerId);
+      this.scrub = true;
+      this.tlHover = null;
+      this.tlPointer = frac(e);
+      seek(e);
+    });
     canvas.addEventListener('pointermove', e => {
       this.tlPointer = frac(e);
       if (this.scrub) { seek(e); return; }
       this.tlHover = this.tlPointer;
     });
-    canvas.addEventListener('pointerup', () => { this.scrub = false; });
+    const endScrub = () => { this.scrub = false; };
+    canvas.addEventListener('pointerup', endScrub);
+    canvas.addEventListener('pointercancel', endScrub);
+    canvas.addEventListener('lostpointercapture', endScrub);
     canvas.addEventListener('pointerleave', () => { this.tlHover = null; this.tlPointer = null; if (this.tip) this.tip.hidden = true; });
     // Keyboard scrubbing: the timeline is exposed as role="slider" tabindex="0".
     // Arrow steps move 2% of *visual* width so each press covers the same distance
@@ -132,6 +162,14 @@ export class VisualRenderer {
 
   fit() { this.userCam = false; this.focusId = null; }
 
+  /** Zoom around the canvas centre by a multiplicative factor (on-canvas +/− buttons). */
+  zoomBy(factor: number) {
+    // The world transform pins `cam` at the screen centre, so scaling alone keeps the
+    // centre fixed — no need to re-anchor cam.x/cam.y.
+    this.cam.s = Math.min(3, Math.max(0.12, this.cam.s * factor));
+    this.userCam = true; this.focusId = null;
+  }
+
   drawFrame(t: number, dt: number) {
     if (!this.eng) return;
     this.seekAt = t;
@@ -146,17 +184,32 @@ export class VisualRenderer {
   private bindCanvas() {
     const el = this.canvas;
     el.addEventListener('pointerdown', e => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      e.preventDefault();
       el.setPointerCapture(e.pointerId);
       const hit = this.hitTest(e.offsetX, e.offsetY);
-      this.down = { x: e.offsetX, y: e.offsetY, moved: 0, node: hit, cx: this.cam.x, cy: this.cam.y, px: e.offsetX, py: e.offsetY, pt: e.timeStamp, pvx: 0, pvy: 0 };
+      const wp = this.toWorld(e.offsetX, e.offsetY);
+      document.body.classList.add('is-canvas-gesturing');
+      el.classList.add('dragging');
+      this.down = {
+        x: e.offsetX, y: e.offsetY, moved: 0, dragging: false,
+        node: hit, nodeDx: hit ? hit.x - wp.x : 0, nodeDy: hit ? hit.y - wp.y : 0,
+        cx: this.cam.x, cy: this.cam.y, px: e.offsetX, py: e.offsetY, pt: e.timeStamp, pvx: 0, pvy: 0,
+      };
     });
     el.addEventListener('pointermove', e => {
       if (this.down) {
+        e.preventDefault();
         const dx = e.offsetX - this.down.x, dy = e.offsetY - this.down.y;
-        this.down.moved += Math.abs(dx) + Math.abs(dy);
-        if (this.down.node) {
+        const dist = Math.hypot(dx, dy);
+        this.down.moved = Math.max(this.down.moved, dist);
+        if (!this.down.dragging && dist >= DRAG_THRESHOLD_PX) {
+          this.down.dragging = true;
+          this.focusId = null;
+        }
+        if (this.down.dragging && this.down.node) {
           const n = this.down.node; const w = this.toWorld(e.offsetX, e.offsetY);
-          n.x = w.x; n.y = w.y; n.vx = 0; n.vy = 0;
+          n.x = w.x + this.down.nodeDx; n.y = w.y + this.down.nodeDy; n.vx = 0; n.vy = 0;
           const d = this.down, dtm = e.timeStamp - d.pt;
           if (dtm > 0) {
             const k = .7;
@@ -164,7 +217,7 @@ export class VisualRenderer {
             d.pvy = d.pvy * (1 - k) + ((e.offsetY - d.py) / dtm) * k;
             d.px = e.offsetX; d.py = e.offsetY; d.pt = e.timeStamp;
           }
-        } else if (this.down.moved > 4) {
+        } else if (this.down.dragging) {
           this.userCam = true; this.focusId = null;
           this.cam.x = this.down.cx - dx / this.cam.s; this.cam.y = this.down.cy - dy / this.cam.s;
         }
@@ -176,17 +229,19 @@ export class VisualRenderer {
     });
     el.addEventListener('pointerup', e => {
       const d = this.down;
-      if (d && d.moved < 5) {
+      if (d && !d.dragging) {
         this.selectedId = d.node ? d.node.id : null;
         this.onSelect?.(this.selectedId);
-      } else if (d?.node && !this.reduceMotion && e.timeStamp - d.pt <= 80) {
+      } else if (d?.dragging && d.node && !this.reduceMotion && e.timeStamp - d.pt <= 80) {
         let vx = (d.pvx / this.cam.s) * 16, vy = (d.pvy / this.cam.s) * 16;
         const sp = Math.hypot(vx, vy);
         if (sp > 7) { vx *= 7 / sp; vy *= 7 / sp; }
         d.node.vx = vx; d.node.vy = vy;
       }
-      this.down = null;
+      this.clearPointerGesture();
     });
+    el.addEventListener('pointercancel', () => this.clearPointerGesture());
+    el.addEventListener('lostpointercapture', () => this.clearPointerGesture());
     el.addEventListener('wheel', e => {
       e.preventDefault();
       const dy = Math.max(-240, Math.min(240, e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? this.canvas.clientHeight : 1)));
@@ -200,12 +255,18 @@ export class VisualRenderer {
     el.addEventListener('dblclick', () => this.fit());
   }
 
+  private clearPointerGesture() {
+    this.down = null;
+    document.body.classList.remove('is-canvas-gesturing');
+    this.canvas.classList.remove('dragging');
+  }
+
   private hitTest(px: number, py: number): NodeState | null {
     const wp = this.toWorld(px, py);
     let best: NodeState | null = null, bd = 1e9;
     for (const n of this.nodes.values()) {
       const d = Math.hypot(n.x - wp.x, n.y - wp.y);
-      if (d * this.cam.s < Math.max(n.r * this.cam.s, 6) + 8 && d < bd) { bd = d; best = n; }
+      if (d * this.cam.s < Math.max(n.r * this.cam.s + 10, NODE_HIT_RADIUS_PX) && d < bd) { bd = d; best = n; }
     }
     return best;
   }
@@ -280,8 +341,10 @@ export class VisualRenderer {
     const ns: NodeState[] = [];
     for (const n of this.nodes.values()) { if (this.powerDown(n.a, t) < 1) ns.push(n); }
     const st = Math.min(2, dt / 16);
+    const dragged = this.down?.dragging && this.down.node ? this.down.node.id : null;
     if (this.layout === 'fixed') {
       for (const n of ns) {
+        if (n.id === dragged) continue;
         const target = this.staticPos.get(n.id); if (!target) continue;
         n.vx += (target.x - n.x) * 0.12 * st; n.vy += (target.y - n.y) * 0.12 * st;
         n.vx *= Math.pow(0.55, st); n.vy *= Math.pow(0.55, st); n.x += n.vx * st; n.y += n.vy * st;
@@ -291,6 +354,7 @@ export class VisualRenderer {
     if (this.layout === 'radial') {
       this.radialLayout();
       for (const n of ns) {
+        if (n.id === dragged) continue;
         if (n.tx != null) { n.vx += (n.tx - n.x) * 0.05 * st; n.vy += (n.ty! - n.y) * 0.05 * st; }
         n.vx *= Math.pow(0.7, st); n.vy *= Math.pow(0.7, st); n.x += n.vx * st; n.y += n.vy * st;
       }
@@ -300,9 +364,12 @@ export class VisualRenderer {
       const A = ns[i], B = ns[j]; let dx = B.x - A.x, dy = B.y - A.y, d2 = dx * dx + dy * dy;
       if (d2 < 1) { dx = ((hash(A.id) % 10) - 5) || 1; dy = ((hash(B.id) % 10) - 5) || 1; d2 = dx * dx + dy * dy; }
       const d = Math.sqrt(d2); const rep = (3400 * (A.r + B.r) / 42) / (d2 + 500);
-      const fx = dx / d * rep, fy = dy / d * rep; A.vx -= fx * st; A.vy -= fy * st; B.vx += fx * st; B.vy += fy * st;
+      const fx = dx / d * rep, fy = dy / d * rep;
+      if (A.id !== dragged) { A.vx -= fx * st; A.vy -= fy * st; }
+      if (B.id !== dragged) { B.vx += fx * st; B.vy += fy * st; }
     }
     for (const n of ns) {
+      if (n.id === dragged) { n.vx = 0; n.vy = 0; continue; }
       const p = n.a.parent && this.nodes.get(n.a.parent);
       const pd = this.powerDown(n.a, t);
       if (p && pd < 1) {
@@ -337,7 +404,17 @@ export class VisualRenderer {
     const vw = Math.max(140, px1 - px0), vh = h - 80;
     const ts = Math.min(1.35, Math.max(0.14, Math.min(vw / Math.max(1, x1 - x0), vh / Math.max(1, y1 - y0))));
     const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-    const tx = cx - ((px0 + px1) / 2 - w / 2) / ts;
+    // Panels (rail / inspector) are overlays: treat their gutters as *constraints*,
+    // not a fixed reservation. Center content on screen by default, then nudge only
+    // as far as needed to keep it clear of a panel. This keeps a lone orchestrator
+    // dead-centre instead of shoving it ~130px right for a rail that isn't occluding it.
+    const halfW = ((x1 - x0) / 2) * ts;
+    const leftEdge = w / 2 - halfW, rightEdge = w / 2 + halfW;
+    let shiftPx = 0;
+    if (leftEdge < px0 && rightEdge > px1) shiftPx = (px0 + px1) / 2 - w / 2; // wider than gap: centre within it
+    else if (leftEdge < px0) shiftPx = px0 - leftEdge;                       // clears rail
+    else if (rightEdge > px1) shiftPx = -(rightEdge - px1);                  // clears inspector
+    const tx = cx - shiftPx / ts;
     this.cam.s += (ts - this.cam.s) * 0.045; this.cam.x += (tx - this.cam.x) * 0.05; this.cam.y += (cy - this.cam.y) * 0.05;
   }
 
@@ -402,6 +479,7 @@ export class VisualRenderer {
 
   private drawEffects(T: number, x: CanvasRenderingContext2D) {
     if (!this.eng) return;
+    if (this.reduceMotion) return;
     const evs = this.eng.evs;
     for (let i = this.evLowerBound(T - 1300); i < evs.length; i++) {
       const e = evs[i];
@@ -584,7 +662,7 @@ export class VisualRenderer {
   }
 
   /** Nearest event within `px` pixels of warped time t — pointer landings snap to data. */
-  private nearestEvent(t: number, width: number, px = 5): AwvEvent | null {
+  private nearestEvent(t: number, width: number, px = TL_SNAP_PX): AwvEvent | null {
     const eng = this.eng;
     if (!eng || !eng.evs.length) return null;
     const i = this.evLowerBound(t);

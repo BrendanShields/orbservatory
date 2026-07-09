@@ -1,11 +1,12 @@
 import type { SearchResponse, SessionStats, SessionSummary } from '../shared/schema';
-import { esc } from './panels';
+import { html } from './html';
 import { relTime, tierBadge } from './stats-viz';
 
 export interface PaletteCallbacks {
   onOpen(id: string): void;
   /** Server full-text search; resolve null on failure. */
   search(q: string): Promise<SearchResponse | null>;
+  onOpenChange?(open: boolean): void;
 }
 
 interface Candidate {
@@ -40,8 +41,8 @@ export class Palette {
     this.el.setAttribute('aria-modal', 'true');
     this.el.setAttribute('aria-label', 'Quick session switch');
     this.el.innerHTML = `<div class="palette-card">
-      <input class="palette-q" type="text" placeholder="Jump to session… (type to search metadata + full text)" aria-label="Search sessions" autocomplete="off" spellcheck="false">
-      <div class="palette-list" role="listbox"></div>
+      <input class="palette-q" type="text" placeholder="Jump to session… (type to search metadata + full text)" aria-label="Search sessions" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="paletteList" aria-activedescendant="">
+      <div id="paletteList" class="palette-list" role="listbox"></div>
       <div class="palette-hint">↑↓ navigate · ↵ open · esc close</div>
     </div>`;
     parent.append(this.el);
@@ -62,6 +63,8 @@ export class Palette {
     this.open = false; // force re-show even if already open (refresh results)
     this.el.hidden = false;
     this.open = true;
+    this.cb.onOpenChange?.(true);
+    this.input.setAttribute('aria-expanded', 'true');
     this.input.value = '';
     this.query('');
     this.input.focus();
@@ -70,6 +73,9 @@ export class Palette {
   hide() {
     this.open = false;
     this.el.hidden = true;
+    this.cb.onOpenChange?.(false);
+    this.input.setAttribute('aria-expanded', 'false');
+    this.input.removeAttribute('aria-activedescendant');
   }
 
   toggle() { this.open ? this.hide() : this.show(); }
@@ -117,14 +123,16 @@ export class Palette {
   private renderList() {
     if (!this.results.length) {
       this.listEl.innerHTML = `<div class="palette-none">No matching sessions</div>`;
+      this.input.removeAttribute('aria-activedescendant');
       return;
     }
-    this.listEl.innerHTML = this.results.map((r, i) => `
-      <div class="palette-row${i === this.sel ? ' sel' : ''}" role="option" aria-selected="${i === this.sel}" data-i="${i}">
+    this.listEl.innerHTML = html`${this.results.map((r, i) => html`
+      <div id="paletteOpt-${i}" class="palette-row${i === this.sel ? ' sel' : ''}" role="option" aria-selected="${i === this.sel}" data-i="${i}">
         <span class="p-dot${r.sum.live ? ' live' : ''}"></span>
-        <span class="p-main"><b>${esc(r.sum.title || r.sum.id.slice(0, 8))}</b><span>${esc(r.sum.projectName || r.sum.project)} · ${relTime(r.sum.lastActive)}</span>${r.snippet ? `<em class="p-snip">${esc(r.field || '')}: ${esc(r.snippet)}</em>` : ''}</span>
+        <span class="p-main"><b>${r.sum.title || r.sum.id.slice(0, 8)}</b><span>${r.sum.projectName || r.sum.project} · ${relTime(r.sum.lastActive)}</span>${r.snippet ? html`<em class="p-snip">${r.field || ''}: ${r.snippet}</em>` : ''}</span>
         ${tierBadge(r.stats)}
-      </div>`).join('');
+      </div>`)}`.s;
+    this.input.setAttribute('aria-activedescendant', `paletteOpt-${this.sel}`);
     this.listEl.querySelectorAll<HTMLElement>('.palette-row').forEach((row) => {
       row.onclick = () => this.openSel(Number(row.dataset.i));
       row.onmousemove = () => {

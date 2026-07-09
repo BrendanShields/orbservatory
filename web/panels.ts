@@ -1,5 +1,6 @@
 import type { AgentStatus, Engine, EngineAgent } from './engine';
 import { colorOf, fmt, fmtT, ringColor, statusAt, tokensAt } from './engine';
+import { html, type Html } from './html';
 
 export function statusMeta(st: string): [string, string] {
   return ({ pending: ['queued', 'rgba(150,200,215,.45)'], active: ['live', '#7adcf2'], idle: ['idle', 'rgba(150,200,215,.45)'], error: ['error', '#ff7a70'], complete: ['done', 'rgba(132,228,192,.75)'] } as any)[st];
@@ -133,7 +134,7 @@ export function renderInspector(el: HTMLElement, eng: Engine | undefined, t: num
     st.last = {};
   }
   const R = st.refs!, last = st.last;
-  const setHtml = (k: string, node: HTMLElement, html: string) => { if (last[k] !== html) { last[k] = html; node.innerHTML = html; } };
+  const setHtml = (k: string, node: HTMLElement, h: Html) => { if (last[k] !== h.s) { last[k] = h.s; node.innerHTML = h.s; } };
   const status = statusAt(sel, t, liveNow), tok = tokensAt(sel, t), lim = sel.def.limit || 1000000, pct = Math.min(1, tok / lim), [lbl, scol] = statusMeta(status);
   const col = colorOf(sel);
   const src = sourceOf?.(selectedId!);
@@ -152,14 +153,16 @@ export function renderInspector(el: HTMLElement, eng: Engine | undefined, t: num
     R.pill.textContent = lbl.toUpperCase();
     R.pill.style.color = scol; R.pill.style.borderColor = scol + '44'; R.pill.style.background = scol + '12';
   }
-  setHtml('ctx', R.ctx, `<div><b>${fmt(tok)}</b><span>/ ${fmt(lim)} context</span></div><strong>${Math.round(pct * 100)}%</strong><i><em style="width:${(pct * 100).toFixed(1)}%;background:${ringColor(pct)}"></em></i>`);
+  setHtml('ctx', R.ctx, html`<div><b>${fmt(tok)}</b><span>/ ${fmt(lim)} context</span></div><strong>${Math.round(pct * 100)}%</strong><i><em style="width:${(pct * 100).toFixed(1)}%;background:${ringColor(pct)}"></em></i>`);
   setHtml('stats', R.stats, runStats(sel.def));
   const skills: Record<string, number> = {};
   for (const e of sel.evs) if (e.type === 'tool' && e.t <= t) skills[e.tool] = (skills[e.tool] || 0) + 1;
-  setHtml('chips', R.chips, Object.entries(skills).map(([k, v]) => `<span>${esc(k)} <b>${v}</b></span>`).join('') || '<em>None yet</em>');
-  setHtml('children', R.children, sel.children.map(cid => childRow(eng.agents.get(cid)!, t, liveNow)).join('') || '<em>No child agents</em>');
+  const chips = Object.entries(skills).map(([k, v]) => html`<span>${k} <b>${v}</b></span>`);
+  setHtml('chips', R.chips, chips.length ? html`${chips}` : html`<em>None yet</em>`);
+  const children = sel.children.map(cid => childRow(eng.agents.get(cid)!, t, liveNow));
+  setHtml('children', R.children, children.length ? html`${children}` : html`<em>No child agents</em>`);
   // Walk backwards from the newest visible event — the log shows at most 70 rows.
-  const log: string[] = [];
+  const log: Html[] = [];
   for (let i = sel.evs.length - 1; i >= 0 && log.length < 70; i--) {
     const e = sel.evs[i];
     if (e.t > t) continue;
@@ -173,7 +176,7 @@ export function renderInspector(el: HTMLElement, eng: Engine | undefined, t: num
     else if (e.type === 'error') log.push(logRow(time, 'ERROR', '#ff7a70', e.label || 'error', ''));
     else if (e.type === 'complete') log.push(logRow(time, 'DONE', '#84e4c0', e.label || 'completed', ''));
   }
-  const logHtml = log.join('') || '<em>No visible events yet</em>';
+  const logHtml = (log.length ? html`${log}` : html`<em>No visible events yet</em>`).s;
   if (last.log !== logHtml) {
     last.log = logHtml;
     const oldTop = R.log.scrollTop, oldH = R.log.scrollHeight;
@@ -182,21 +185,20 @@ export function renderInspector(el: HTMLElement, eng: Engine | undefined, t: num
   }
 }
 
-function runStats(a: import('../shared/schema').AwvAgent): string {
-  const cells: string[] = [];
+function runStats(a: import('../shared/schema').AwvAgent): Html {
+  const cells: Html[] = [];
   if (a.durationMs != null) cells.push(cell('duration', fmtDur(a.durationMs)));
   if (a.totalTokens != null) cells.push(cell('tokens', fmt(a.totalTokens)));
   if (a.toolCount != null) cells.push(cell('tool calls', String(a.toolCount)));
   const ts = a.toolStats;
   if (ts && (ts.linesAdded || ts.linesRemoved)) cells.push(cell('lines', `+${ts.linesAdded || 0} −${ts.linesRemoved || 0}`));
   if (a.model) cells.push(cell('model', a.model.replace(/^claude-/, '')));
-  const result = a.result ? `<p class="task run-result">${esc(a.result)}</p>` : '';
-  if (!cells.length && !result) return '';
-  return `<div class="run-stats">${cells.join('')}</div>${result}`;
+  if (!cells.length && !a.result) return html``;
+  return html`<div class="run-stats">${cells}</div>${a.result ? html`<p class="task run-result">${a.result}</p>` : ''}`;
 }
 
-function cell(label: string, value: string): string {
-  return `<div class="run-cell"><b>${esc(value)}</b><span>${esc(label)}</span></div>`;
+function cell(label: string, value: string): Html {
+  return html`<div class="run-cell"><b>${value}</b><span>${label}</span></div>`;
 }
 
 function fmtDur(ms: number): string {
@@ -207,13 +209,11 @@ function fmtDur(ms: number): string {
   return `${m}m ${Math.round(s % 60)}s`;
 }
 
-function childRow(a: EngineAgent, t: number, liveNow: number | undefined) {
+function childRow(a: EngineAgent, t: number, liveNow: number | undefined): Html {
   const st = statusAt(a, t, liveNow), pct = Math.min(1, tokensAt(a, t) / (a.def.limit || 1000000)), [label, scol] = statusMeta(st);
-  return `<button class="child-row" data-child="${esc(a.id)}" style="--agent:${colorOf(a)}"><span></span><b>${esc(a.def.name)}</b><em style="color:${scol}">${label} · ${(pct * 100).toFixed(0)}%</em></button>`;
+  return html`<button class="child-row" data-child="${a.id}" style="--agent:${colorOf(a)}"><span></span><b>${a.def.name}</b><em style="color:${scol}">${label} · ${(pct * 100).toFixed(0)}%</em></button>`;
 }
 
-function logRow(time: string, tag: string, color: string, text: string, delta: string) {
-  return `<div class="log-row"><time>${time}</time><b style="color:${color}">${esc(tag)}</b><span>${esc(text)}</span><em>${esc(delta)}</em></div>`;
+function logRow(time: string, tag: string, color: string, text: string, delta: string): Html {
+  return html`<div class="log-row"><time>${time}</time><b style="color:${color}">${tag}</b><span>${text}</span><em>${delta}</em></div>`;
 }
-
-export function esc(v: string) { return String(v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!)); }
