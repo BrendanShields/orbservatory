@@ -33,7 +33,7 @@ app.innerHTML = `
       <input id="file" type="file" accept="application/json,.json" hidden>
     </header>
     <main class="stage">
-      <canvas id="canvas" aria-label="Agent orchestra graph" role="img"></canvas>
+      <canvas id="canvas" aria-label="Agent session graph" role="img"></canvas>
       <aside id="rail" class="rail"></aside>
       <button id="railToggle" class="rail-toggle" aria-label="Show agents panel">AGENTS</button>
       <aside id="inspector" class="inspector" aria-live="polite" hidden></aside>

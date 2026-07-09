@@ -156,14 +156,19 @@ button:active{transform:scale(.97)}
 /* ---------- Sessions Home ---------- */
 .home-root{position:absolute;inset:0;overflow-y:auto}
 .home{max-width:1240px;margin:0 auto;padding:0 22px 48px;font-family:Outfit,sans-serif;color:var(--text)}
-.home-head{position:sticky;top:0;z-index:5;display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 -22px 10px;padding:16px 22px;background:rgba(var(--bg-rgb),.86);backdrop-filter:blur(14px);border-bottom:1px solid rgba(var(--chrome-rgb),.08)}
-.home-head .brand{margin-right:6px}
+.home-head{position:sticky;top:0;z-index:5;display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:0 -22px 16px;padding:14px 22px;background:rgba(var(--bg-rgb),.86);backdrop-filter:blur(14px);border-bottom:1px solid rgba(var(--chrome-rgb),.08)}
+.home-head .brand{margin-right:10px}
 .home-head .brand b{font-size:12px}
 .home-head .brand span{font-size:7.5px}
-.icon-cluster{display:flex;gap:6px;flex:none}
+.home-head .ghost{padding:9px 14px;flex:none}
+.icon-cluster{display:flex;gap:8px;flex:none}
 .home-q{flex:1 1 260px;min-width:220px;background:rgba(var(--panel-rgb),.9);border:1px solid rgba(var(--accent-rgb),.22);border-radius:8px;padding:8px 12px;color:var(--text-bright);font:inherit;font-size:13px;outline:none}
 .home-q:focus{border-color:rgba(var(--accent-rgb),.55);box-shadow:0 0 0 3px rgba(var(--accent-rgb),.14)}
-.home-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:14px 0 0}
+.home-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 4px}
+.chip-rows{margin-bottom:2px}
+.pager{display:flex;align-items:center;justify-content:center;gap:14px;padding:16px 0 6px;font-family:'JetBrains Mono',monospace;font-size:11px;color:rgba(var(--text-dim-rgb),.8)}
+.pager button{min-width:34px}
+.pager button[disabled]{opacity:.35;pointer-events:none}
 .home-facets{display:flex;gap:6px;flex-wrap:wrap;padding:8px;border:1px solid rgba(var(--chrome-rgb),.14);border-radius:12px;background:rgba(var(--panel-rgb),.5);margin:0 0 8px}
 .home-facets[hidden]{display:none}
 .facet-chips{display:flex;gap:5px;flex-wrap:wrap}
@@ -182,7 +187,9 @@ button:active{transform:scale(.97)}
 .lc-main span::before{content:' — '}
 .lc-side{text-align:right;font-family:'JetBrains Mono',monospace;font-size:10px;color:rgba(var(--text-mid-rgb),.85);flex:none;white-space:nowrap}
 .lc-side em{font-style:normal;font-size:8px;color:rgba(var(--text-dim-rgb),.55);letter-spacing:.06em;text-transform:uppercase;margin-left:4px}
-.home-stats{display:flex;align-items:center;gap:12px;margin:14px 0 0}
+.insights-zone{border:1px solid rgba(var(--chrome-rgb),.12);border-radius:14px;background:rgba(var(--panel-rgb),.45);padding:10px 14px;margin:0 0 16px}
+.insights-zone .home-agg-wrap.open .home-agg{padding-top:12px}
+.home-stats{display:flex;align-items:center;gap:12px}
 .statline{font-size:12px;color:rgba(var(--text-mid-rgb),.8)}
 .insights-toggle{font-size:11px;padding:5px 10px;display:flex;align-items:center;gap:5px}
 .ins-chev{font-style:normal;display:inline-block;transition:transform .18s ease}
@@ -198,7 +205,7 @@ button:active{transform:scale(.97)}
 .home-btn{white-space:nowrap;margin-right:4px}
 .chip-toggle{background:transparent;border:1px solid rgba(var(--accent-rgb),.2);color:rgba(var(--text-dim-rgb),.75);border-radius:20px;padding:5px 12px;font:inherit;font-size:11px;cursor:pointer}
 .chip-toggle.on{color:var(--accent-bright);border-color:rgba(var(--accent-rgb),.5);background:rgba(var(--accent-rgb),.1)}
-.home-agg .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:14px 0 8px}
+.home-agg .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:0 0 8px}
 .tile{background:rgba(var(--panel-rgb),.75);border:1px solid rgba(var(--accent-rgb),.14);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:3px;animation:rowIn .16s ease-out}
 .tile-v{font-size:20px;font-weight:700;color:var(--text-bright)}
 .tile-l{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:rgba(var(--chrome-rgb),.75)}

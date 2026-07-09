@@ -32,6 +32,7 @@ const SORT_LABELS: Record<SortKey, string> = {
 const SKEL = raw('<span class="skel">…</span>');
 const FACETS = ['project', 'source', 'model', 'tier', 'skill', 'tool'] as const;
 type FacetKey = typeof FACETS[number];
+const PAGE_SIZE = 25;
 
 interface ColDef { label: string; cls?: string; detail?: boolean; cell(r: HomeRow): Html | string }
 
@@ -47,6 +48,7 @@ export class HomeView {
   private searching = false;
   private searchPartial = false;
   private filterOpen = false;
+  private page = 0;
   private els: {
     q: HTMLInputElement; live: HTMLButtonElement; filterToggle: HTMLButtonElement; sort: HTMLSelectElement; dir: HTMLButtonElement;
     detailsBtn: HTMLButtonElement; chips: HTMLElement; facets: HTMLElement; liveStrip: HTMLElement;
@@ -57,7 +59,7 @@ export class HomeView {
     root.innerHTML = `
       <div class="home" role="main">
         <div class="home-head">
-          <div class="brand"><i></i><div><b>AGENT ORCHESTRA</b><span>CLAUDE CODE LIVE VISUALISER</span></div></div>
+          <div class="brand"><i></i><div><b>ORBSERVATORY</b><span>CLAUDE CODE LIVE VISUALISER</span></div></div>
           <input id="homeQ" class="home-q" type="search" placeholder="⌕ Search sessions… (title, project, skills, tools, full text) (/)" aria-label="Search sessions" autocomplete="off" spellcheck="false">
           <button id="homeImportBtn" class="ghost" title="Import an exported AWV session">Import session</button>
           <div class="icon-cluster">
@@ -65,12 +67,14 @@ export class HomeView {
             <button id="homeSettings" class="cnav-btn" aria-label="Settings" title="Settings">⚙</button>
           </div>
         </div>
-        <div class="home-stats">
-          <span id="homeStatline" class="statline"></span>
-          <button id="homeInsights" class="ghost insights-toggle" aria-expanded="false">Insights <i class="ins-chev">▾</i></button>
-          <div id="homeLiveStrip" class="live-strip" role="list" aria-label="Live sessions" hidden></div>
+        <div class="insights-zone">
+          <div class="home-stats">
+            <span id="homeStatline" class="statline"></span>
+            <button id="homeInsights" class="ghost insights-toggle" aria-expanded="false">Insights <i class="ins-chev">▾</i></button>
+            <div id="homeLiveStrip" class="live-strip" role="list" aria-label="Live sessions" hidden></div>
+          </div>
+          <div id="homeAgg" class="home-agg-wrap"><div id="homeAggInner" class="home-agg" aria-label="Aggregate stats for the filtered set"></div></div>
         </div>
-        <div id="homeAgg" class="home-agg-wrap"><div id="homeAggInner" class="home-agg" aria-label="Aggregate stats for the filtered set"></div></div>
         <div class="home-controls">
           <button id="homeFilterToggle" class="ghost filter-toggle" aria-expanded="false" aria-controls="homeFacets">Filters</button>
           <div id="homeChips" class="facet-chips"></div>
@@ -102,10 +106,10 @@ export class HomeView {
       insights: root.querySelector('#homeInsights')!,
     };
     this.els.q.oninput = () => this.onQuery(this.els.q.value);
-    this.els.live.onclick = () => { this.filter.liveOnly = !this.filter.liveOnly; this.render(); };
+    this.els.live.onclick = () => { this.filter.liveOnly = !this.filter.liveOnly; this.page = 0; this.render(); };
     this.els.filterToggle.onclick = () => { this.filterOpen = !this.filterOpen; this.render(); };
-    this.els.sort.onchange = () => { this.sort = this.els.sort.value as SortKey; this.render(); };
-    this.els.dir.onclick = () => { this.desc = !this.desc; this.render(); };
+    this.els.sort.onchange = () => { this.sort = this.els.sort.value as SortKey; this.page = 0; this.render(); };
+    this.els.dir.onclick = () => { this.desc = !this.desc; this.page = 0; this.render(); };
     this.els.detailsBtn.onclick = () => {
       this.details = !this.details;
       localStorage.setItem('homeDetails', this.details ? '1' : '0');
@@ -132,6 +136,7 @@ export class HomeView {
     this.filter.text = q;
     this.filter.textIds = null;
     this.searchPartial = false;
+    this.page = 0;
     this.render(); // metadata matches are instant
     if (this.searchTimer) clearTimeout(this.searchTimer);
     const trimmed = q.trim();
@@ -150,6 +155,7 @@ export class HomeView {
 
   private setFacet<K extends keyof HomeFilter>(k: K, v: HomeFilter[K]) {
     this.filter[k] = v;
+    this.page = 0;
     this.render();
   }
 
@@ -308,17 +314,31 @@ export class HomeView {
       this.els.list.innerHTML = html`<div class="home-empty"><h2>No matches</h2><p>No sessions match the current filters${this.filter.text.trim() ? ' or search' : ''}. Clear a filter or broaden the query.</p></div>`.s;
       return;
     }
+    const pages = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
+    if (this.page >= pages) this.page = pages - 1;
+    const start = this.page * PAGE_SIZE;
+    const slice = visible.slice(start, start + PAGE_SIZE);
     const cols = this.cols(this.data.pricingConfigured).filter((c) => this.details || !c.detail);
     const head = html`<tr>${cols.map((c) => html`<th class="${c.cls || ''}">${c.label}</th>`)}</tr>`;
-    const body = visible.map((r) => html`<tr class="srow" data-id="${r.sum.id}" tabindex="0" role="link" aria-label="Open session ${r.sum.title || r.sum.id.slice(0, 8)}">
+    const body = slice.map((r) => html`<tr class="srow" data-id="${r.sum.id}" tabindex="0" role="link" aria-label="Open session ${r.sum.title || r.sum.id.slice(0, 8)}">
       ${cols.map((c) => html`<td class="${c.cls || ''}">${c.cell(r)}</td>`)}
     </tr>`);
-    this.els.list.innerHTML = html`<table class="home-table">${head}${body}</table>`.s;
+    const pager = visible.length > PAGE_SIZE ? html`<div class="pager">
+      <button id="pgPrev" class="ghost" aria-label="Previous page"${this.page === 0 ? raw(' disabled') : ''}>←</button>
+      <span>${start + 1}–${Math.min(start + PAGE_SIZE, visible.length)} of ${visible.length}</span>
+      <button id="pgNext" class="ghost" aria-label="Next page"${this.page >= pages - 1 ? raw(' disabled') : ''}>→</button>
+    </div>` : html``;
+    this.els.list.innerHTML = html`<table class="home-table">${head}${body}</table>${pager}`.s;
     this.els.list.querySelectorAll<HTMLTableRowElement>('tr.srow').forEach((tr) => {
       const open = () => this.cb.onOpen(tr.dataset.id!);
       tr.onclick = open;
       tr.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
     });
+    const turn = (d: number) => { this.page += d; this.render(); this.root.scrollTo({ top: 0 }); };
+    const prev = this.els.list.querySelector<HTMLButtonElement>('#pgPrev');
+    const next = this.els.list.querySelector<HTMLButtonElement>('#pgNext');
+    if (prev) prev.onclick = () => turn(-1);
+    if (next) next.onclick = () => turn(1);
   }
 }
 
