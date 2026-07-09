@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { buildWarp, parseSession, tokensAt } from '../web/engine';
+import { buildWarp, parseSession, statusAt, tokensAt } from '../web/engine';
 import type { AwvSession } from '../shared/schema';
 
 test('spawnT clamps to first observed activity for future-stamped or missing spawns', () => {
@@ -36,6 +36,88 @@ test('spawn without token data reports zero tokens, not a fabricated floor', () 
   const eng = parseSession(sc);
   expect(tokensAt(eng.agents.get('kid')!, 5000)).toBe(0);
   expect(tokensAt(eng.agents.get('root')!, 5000)).toBe(500);
+});
+
+test('parent spawnT clamps to earliest child so wires never dangle', () => {
+  const sc = {
+    name: 't', desc: '',
+    agents: [
+      { id: 'root', name: 'Root', role: 'root' },
+      { id: 'wf', name: 'Workflow' },
+      { id: 'sub', name: 'Sub' },
+    ],
+    events: [
+      { t: 1000, type: 'spawn', agent: 'sub', parent: 'wf' },
+      { t: 1500, type: 'tool', agent: 'sub', tool: 'Read' },
+      { t: 5000, type: 'spawn', agent: 'wf', parent: 'root' },
+      { t: 6000, type: 'tool', agent: 'root', tool: 'Bash' },
+    ],
+  } as unknown as AwvSession;
+  const eng = parseSession(sc);
+  expect(eng.agents.get('wf')!.spawnT).toBeLessThanOrEqual(1000);
+  expect(eng.agents.get('root')!.spawnT).toBeLessThanOrEqual(1000);
+});
+
+test('completeT resets when activity follows the last complete', () => {
+  const sc = {
+    name: 't', desc: '',
+    agents: [{ id: 'root', name: 'Root', role: 'root' }],
+    events: [
+      { t: 0, type: 'spawn', agent: 'root' },
+      { t: 2000, type: 'complete', agent: 'root' },
+      { t: 3000, type: 'tool', agent: 'root', tool: 'Bash' },
+    ],
+  } as unknown as AwvSession;
+  const a = parseSession(sc).agents.get('root')!;
+  expect(a.completeT).toBe(Infinity);
+  expect(statusAt(a, 4000)).toBe('active');
+});
+
+test('completeT holds when complete is the final word', () => {
+  const sc = {
+    name: 't', desc: '',
+    agents: [{ id: 'root', name: 'Root', role: 'root' }],
+    events: [
+      { t: 0, type: 'spawn', agent: 'root' },
+      { t: 1000, type: 'tool', agent: 'root', tool: 'Bash' },
+      { t: 2000, type: 'complete', agent: 'root' },
+    ],
+  } as unknown as AwvSession;
+  const a = parseSession(sc).agents.get('root')!;
+  expect(a.completeT).toBe(2000);
+  expect(statusAt(a, 3000)).toBe('complete');
+});
+
+test('complete → activity → complete keeps the last completeT', () => {
+  const sc = {
+    name: 't', desc: '',
+    agents: [{ id: 'root', name: 'Root', role: 'root' }],
+    events: [
+      { t: 0, type: 'spawn', agent: 'root' },
+      { t: 2000, type: 'complete', agent: 'root' },
+      { t: 3000, type: 'tool', agent: 'root', tool: 'Bash' },
+      { t: 4000, type: 'complete', agent: 'root' },
+    ],
+  } as unknown as AwvSession;
+  const a = parseSession(sc).agents.get('root')!;
+  expect(a.completeT).toBe(4000);
+  expect(statusAt(a, 3500)).toBe('active');
+  expect(statusAt(a, 4500)).toBe('complete');
+});
+
+test('inbound message after complete does not reset completeT', () => {
+  const sc = {
+    name: 't', desc: '',
+    agents: [{ id: 'root', name: 'Root', role: 'root' }, { id: 'kid', name: 'Kid' }],
+    events: [
+      { t: 0, type: 'spawn', agent: 'root' },
+      { t: 100, type: 'spawn', agent: 'kid', parent: 'root' },
+      { t: 2000, type: 'complete', agent: 'kid' },
+      { t: 3000, type: 'message', from: 'root', to: 'kid', tokens: 5 },
+    ],
+  } as unknown as AwvSession;
+  const a = parseSession(sc).agents.get('kid')!;
+  expect(a.completeT).toBe(2000);
 });
 
 test('warp is identity when no gap exceeds the threshold', () => {

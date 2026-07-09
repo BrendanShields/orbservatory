@@ -147,6 +147,14 @@ export function parseSession(sc: AwvSession): Engine {
     // against spawn events stamped far in the future by clock-less transcript
     // records (which would otherwise hide the agent for the whole replay).
     if (a.evs.length) a.spawnT = Math.min(a.spawnT, a.evs[0].t);
+    if (a.completeT !== Infinity) {
+      for (let i = a.evs.length - 1; i >= 0; i--) {
+        const e = a.evs[i];
+        if (e.t <= a.completeT) break;
+        const own = e.type === 'message' ? e.from === a.id : e.type !== 'complete' && 'agent' in e && e.agent === a.id;
+        if (own) { a.completeT = Infinity; break; }
+      }
+    }
     let open: number | null = null;
     for (const e of a.evs) {
       const own = 'agent' in e && (e as any).agent === a.id;
@@ -155,6 +163,13 @@ export function parseSession(sc: AwvSession): Engine {
       else if (open != null && (e.type === 'retry' || e.type === 'tool' || e.type === 'complete')) { a.errRanges.push({ s: open, e: e.t }); open = null; }
     }
     if (open != null) a.errRanges.push({ s: open, e: Infinity });
+  }
+  // A parent must exist no later than its first child, or the child's wire dangles.
+  const byDepth = [...agents.values()].sort((x, y) => y.depth - x.depth);
+  for (const a of byDepth) {
+    if (!a.parent) continue;
+    const p = agents.get(a.parent);
+    if (p) p.spawnT = Math.min(p.spawnT, a.spawnT);
   }
   const duration = Math.max(2500, (evs.length ? evs[evs.length - 1].t : 0) + 2500);
   return { sc, agents, evs, duration, order: (sc.agents || []).map(a => a.id), warp: buildWarp(evs, duration) };
