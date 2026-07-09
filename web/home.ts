@@ -65,6 +65,12 @@ export class HomeView {
             <button id="homeSettings" class="cnav-btn" aria-label="Settings" title="Settings">⚙</button>
           </div>
         </div>
+        <div class="home-stats">
+          <span id="homeStatline" class="statline"></span>
+          <button id="homeInsights" class="ghost insights-toggle" aria-expanded="false">Insights <i class="ins-chev">▾</i></button>
+          <div id="homeLiveStrip" class="live-strip" role="list" aria-label="Live sessions" hidden></div>
+        </div>
+        <div id="homeAgg" class="home-agg-wrap"><div id="homeAggInner" class="home-agg" aria-label="Aggregate stats for the filtered set"></div></div>
         <div class="home-controls">
           <button id="homeFilterToggle" class="ghost filter-toggle" aria-expanded="false" aria-controls="homeFacets">Filters</button>
           <div id="homeChips" class="facet-chips"></div>
@@ -74,12 +80,6 @@ export class HomeView {
           <button id="homeDir" class="ghost dir" aria-label="Toggle sort direction" title="Sort direction">↓</button>
           <button id="homeDetails" class="chip-toggle" aria-pressed="false" title="Show tier, subagents, tools, cost, skills and model columns">details</button>
         </div>
-        <div class="home-stats">
-          <span id="homeStatline" class="statline"></span>
-          <button id="homeInsights" class="ghost insights-toggle" aria-expanded="false">Insights <i class="ins-chev">▾</i></button>
-          <div id="homeLiveStrip" class="live-strip" role="list" aria-label="Live sessions" hidden></div>
-        </div>
-        <div id="homeAgg" class="home-agg-wrap"><div id="homeAggInner" class="home-agg" aria-label="Aggregate stats for the filtered set"></div></div>
         <div id="homeFacets" class="home-facets" role="group" aria-label="Filters" hidden></div>
         <div id="homeMeta" class="home-meta" aria-live="polite"></div>
         <div id="homeList" class="home-list"></div>
