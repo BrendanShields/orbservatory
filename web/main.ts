@@ -1,15 +1,14 @@
-import type { AwvSession, ServerMessage, SessionSource, SessionStats, SessionSummary, Settings } from '../shared/schema';
+import type { AwvSession, ServerMessage, SessionStats, SessionSummary, Settings } from '../shared/schema';
 import { parseSession, fmtT } from './engine';
 import type { Engine } from './engine';
-import { VisualRenderer, PALETTES, type LayoutMode, type PaletteName } from './render';
-import { renderInspector, renderRail } from './panels';
+import { VisualRenderer, type LayoutMode, type PaletteName } from './render';
+import { renderInspector, renderRail, focusRailFilter } from './panels';
 import { HomeView } from './home';
 import { Palette } from './palette';
 import { html, raw } from './html';
 import { Transport, searchServer, putSettings } from './transport';
 import { SettingsModal } from './settingsModal';
 import { setupImport, exportSession } from './importer';
-import { relTime } from './stats-viz';
 
 
 interface ViewSession { id: string; awv: AwvSession; eng: Engine; live: boolean; lastIndex: number; startMs: number }
@@ -26,16 +25,8 @@ app.innerHTML = `
   <div id="graphRoot" class="shell" hidden>
     <header class="topbar">
       <button id="homeBtn" class="ghost home-btn" aria-label="Back to sessions home" title="Sessions home (esc)">← Home</button>
-      <div class="brand"><i></i><div><b>AGENT ORCHESTRA</b><span>CLAUDE CODE LIVE VISUALISER</span></div></div>
-      <select id="sessionPicker" class="select" aria-label="Session"><option value="all-live">All live sessions</option></select>
-      <select id="sourceFilter" class="select compact" aria-label="Filter sessions by source"><option value="all">All sources</option><option value="claude">claude</option><option value="codex">codex</option><option value="opencode">opencode</option><option value="copilot">copilot</option></select>
-      <div id="sessionDesc" class="desc">Connecting to local transcript stream…</div>
-      <select id="layout" class="select compact" aria-label="Layout"><option>organic</option><option>radial</option><option>fixed</option></select>
-      <select id="palette" class="select compact" aria-label="Colour palette">${Object.keys(PALETTES).map(p => `<option>${p}</option>`).join('')}</select>
-      <button id="fit" class="ghost" aria-label="Fit view to agents">⤢ Fit</button>
-      <button id="live" class="live off" aria-label="Follow live">● LIVE</button>
-      <button id="import" class="amber">Import</button>
-      <button id="export" class="amber">Export</button>
+      <button id="sessionTitle" class="session-title bare" aria-label="Switch session (⌘K)" title=""><i></i><b></b><span></span></button>
+      <span class="topbar-spacer"></span>
       <button id="settings" class="ghost" aria-label="Settings" title="Settings">⚙</button>
       <input id="file" type="file" accept="application/json,.json" hidden>
     </header>
@@ -49,13 +40,16 @@ app.innerHTML = `
         <button id="zoomIn" class="cnav-btn" aria-label="Zoom in" title="Zoom in">+</button>
         <button id="zoomOut" class="cnav-btn" aria-label="Zoom out" title="Zoom out">−</button>
         <button id="fitBtn" class="cnav-btn" aria-label="Fit view to agents" title="Fit to view (f)">⤢</button>
+        <i class="cnav-div" aria-hidden="true"></i>
+        <button id="layoutBtn" class="cnav-btn" aria-label="Graph layout" title="Layout">⊞</button>
+        <button id="exportBtn" class="cnav-btn" aria-label="Export session JSON" title="Export session">⇣</button>
+        <button id="helpBtn" class="cnav-btn" aria-label="Keyboard shortcuts" title="Shortcuts">?</button>
       </div>
-      <div class="hint">drag to pan · scroll to zoom · dbl-click to fit · click a node to inspect · space play/pause · ←/→ step · ⌘K switch session · drop AWV JSON to import</div>
     </main>
     <footer class="timeline">
-      <div class="controls"><button id="play" aria-label="Play or pause">▶</button><button id="back" aria-label="Step to previous event">←</button><button id="fwd" aria-label="Step to next event">→</button><button data-speed="0.5" aria-label="0.5× speed">0.5×</button><button class="on" data-speed="1" aria-label="1× speed">1×</button><button data-speed="2" aria-label="2× speed">2×</button><button data-speed="4" aria-label="4× speed">4×</button><button data-speed="16" aria-label="16× speed">16×</button><button data-speed="64" aria-label="64× speed">64×</button></div>
+      <div class="controls"><button id="play" aria-label="Play or pause">▶</button><button id="back" aria-label="Step to previous event">←</button><button id="fwd" aria-label="Step to next event">→</button><button id="speedChip" class="speed-chip" aria-label="Playback speed">1×</button></div>
       <canvas id="tl" aria-label="Timeline scrubber" role="slider" tabindex="0"></canvas>
-      <div id="time" class="time">0:00 / 0:00</div>
+      <div class="t-right"><div id="time" class="time">0:00 / 0:00</div><button id="live" class="live off" aria-label="Follow live" hidden>● LIVE</button></div>
     </footer>
     <div id="dropOverlay" class="drop-overlay" hidden><div>Drop AWV JSON to import</div></div>
   </div>
@@ -71,19 +65,19 @@ renderer.reduceMotion = reduceMotionMq.matches;
 reduceMotionMq.addEventListener('change', e => { renderer.reduceMotion = e.matches; });
 const rail = document.getElementById('rail')!;
 const inspector = document.getElementById('inspector')!;
-const picker = document.getElementById('sessionPicker') as HTMLSelectElement;
-const sourceFilterEl = document.getElementById('sourceFilter') as HTMLSelectElement;
-const desc = document.getElementById('sessionDesc')!;
 const playBtn = document.getElementById('play')!;
 const liveBtn = document.getElementById('live')!;
 const timeEl = document.getElementById('time')!;
+const speedChip = document.getElementById('speedChip')!;
 const fileInput = document.getElementById('file') as HTMLInputElement;
 const emptyEl = document.getElementById('empty')!;
+const titleBtn = document.getElementById('sessionTitle')!;
+const titleProject = titleBtn.querySelector('b')!;
+const titleText = titleBtn.querySelector('span')!;
 let lastEmptyKey = '';
 
 let sessions: SessionSummary[] = [];
 let statsById = new Map<string, SessionStats>();
-let sourceFilter: SessionSource | 'all' = 'all';
 let route: Route = parseRoute(location.hash);
 let views = new Map<string, ViewSession>();
 let active: ViewSession | null = null;
@@ -112,15 +106,22 @@ const homeView = new HomeView(homeRoot, {
 });
 const palette = new Palette(document.body, {
   onOpen: (id) => { location.hash = `#/s/${id}`; },
+  onNode: (id) => { selectedId = id; renderer.selectedId = id; renderer.focusId = id; renderPanels(); },
   search: searchServer,
   onOpenChange: (open) => setGraphInert(open || settingsModal.isOpen),
 });
 palette.bindData(() => ({ sessions, stats: statsById }));
+palette.bindActive(() => active ? { eng: active.eng, selectedId } : null);
+palette.bindCommands(() => [
+  { id: 'import', label: 'Import session…', run: () => fileInput.click() },
+  { id: 'export', label: 'Export session', disabled: !active, run: () => { if (active) exportSession(active.awv); } },
+  { id: 'settings', label: 'Settings', run: () => settingsModal.toggle() },
+]);
 const settingsModal = new SettingsModal(document.getElementById('settingsModal')!, (open) => setGraphInert(open || palette.isOpen));
 const transport = new Transport({
   onOpen: () => { lastLiveKey = ''; subscribe(); updateChrome(); scheduleHome(0); },
   onMessage: handle,
-  onDown: () => { desc.textContent = 'Disconnected — retrying…'; scheduleHome(); },
+  onDown: () => { updateChrome(); scheduleHome(); },
 });
 
 renderer.onSelect = (id) => { selectedId = id; renderer.selectedId = id; renderPanels(); };
@@ -170,11 +171,9 @@ function applyRoute(r: Route, initial = false) {
     livePinned = true; playing = true;
     views.clear(); dirty.clear();
     lastLiveKey = '';
-    desc.textContent = 'Loading session…';
     active = null;
     subscribe();
   }
-  renderPicker();
   updateChrome();
 }
 
@@ -193,7 +192,6 @@ function handle(msg: ServerMessage) {
   if (msg.type === 'sessions') {
     if (msg.bootId) serverBootId = msg.bootId;
     sessions = msg.sessions;
-    renderPicker();
     // Only resubscribe when the set of live sessions actually changed (server broadcasts summaries on any activity).
     if (!imported && route.view === 'live') {
       const key = sessions.filter(s => s.live).map(s => s.id).sort().join(',');
@@ -285,37 +283,11 @@ function applyServerSettings(s: Settings) {
   renderer.showGrid = !!s.showGrid;
   renderer.showSubagentNames = s.showSubagentNames !== false;
   renderer.showOrchestratorName = s.showOrchestratorName !== false;
-  const p = document.getElementById('palette') as HTMLSelectElement;
-  const l = document.getElementById('layout') as HTMLSelectElement;
-  if (p) p.value = s.palette;
-  if (l) l.value = s.layout;
   settingsModal.setSettings(s);
   scheduleHome();
 }
 
 // ---------- active session ----------
-
-function renderPicker() {
-  const liveCount = sessions.filter(s => s.live).length;
-  const visible = sourceFilter === 'all' ? sessions : sessions.filter(s => s.source === sourceFilter);
-  const groups = new Map<string, SessionSummary[]>();
-  for (const s of visible) {
-    const key = s.projectName || s.project;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(s);
-  }
-  const sorted = [...groups.entries()].sort((a, b) => Math.max(...b[1].map(s => s.lastActive)) - Math.max(...a[1].map(s => s.lastActive)));
-  const opts = [];
-  if (imported) opts.push(html`<option value="__imported">Imported replay</option>`);
-  opts.push(html`<option value="all-live">All live sessions (${liveCount})</option>`);
-  for (const [projectName, list] of sorted) {
-    list.sort((a, b) => b.lastActive - a.lastActive);
-    const rows = list.map(s => html`<option value="${s.id}">${s.live ? '● ' : ''}[${s.source}] ${s.title || s.id.slice(0, 8)} — ${relTime(s.lastActive)}</option>`);
-    opts.push(html`<optgroup label="${projectName}">${rows}</optgroup>`);
-  }
-  picker.innerHTML = html`${opts}`.s;
-  picker.value = imported ? '__imported' : (graphChoice(route) ?? 'all-live');
-}
 
 function rebuildActive() {
   if (imported) { setActive(imported); return; }
@@ -409,15 +381,10 @@ function renderPanels() {
   renderRail(rail, active?.eng, simT, selectedId, active?.live ? active.eng.duration : undefined, (id) => {
     selectedId = id; renderer.selectedId = id; renderer.focusId = id; renderPanels();
   }, showCompleted, () => { showCompleted = !showCompleted; renderPanels(); });
+  const sum = active && active.id !== 'all-live' ? summaryOf(active.id) : undefined;
   renderInspector(inspector, active?.eng, simT, selectedId, active?.live ? active.eng.duration : undefined, (id) => {
     selectedId = id; renderer.selectedId = id; renderer.focusId = id; renderPanels();
-  }, () => { selectedId = null; renderer.selectedId = null; renderPanels(); }, sourceOfAgent);
-  // Drive the on-canvas nav offset from the inspector's *settled* hidden state.
-  // A CSS sibling combinator (`#inspector:not([hidden]) ~ .canvas-nav`) is unreliable
-  // here: toggling the `hidden` attribute on an earlier sibling doesn't consistently
-  // invalidate the combinator match for the later sibling, so the nav overlapped the
-  // inspector. An explicit class on the stage is deterministic.
-  document.querySelector('.stage')?.classList.toggle('inspector-open', !inspector.hidden);
+  }, () => { selectedId = null; renderer.selectedId = null; renderPanels(); }, sourceOfAgent, sum ? { cwd: sum.cwd, projectName: sum.projectName } : undefined);
 }
 
 function sourceOfAgent(agentId: string): string | undefined {
@@ -431,9 +398,29 @@ function sourceOfAgent(agentId: string): string | undefined {
 
 function updateChrome(render = true) {
   playBtn.textContent = playing ? '❚❚' : '▶';
+  liveBtn.hidden = !active?.live;
   liveBtn.classList.toggle('off', !livePinned || !active?.live);
   timeEl.textContent = active ? `${fmtT(simT)} / ${fmtT(active.eng.duration)}` : '0:00 / 0:00';
-  desc.textContent = active?.awv.desc || (transport.open ? 'No live sessions yet — start an agent session or import a replay.' : 'Connecting…');
+  let project = '', title = '', liveDot = false;
+  if (imported && active === imported) {
+    project = active.awv.name; title = 'imported replay';
+  } else if (active) {
+    const sum = summaryOf(active.id);
+    project = sum?.projectName || active.awv.name;
+    title = sum?.title || active.awv.desc || '';
+    liveDot = active.live;
+  } else {
+    title = transport.open ? 'No session — ⌘K to switch' : 'Connecting…';
+  }
+  const key = [project, title, liveDot].join('|');
+  if (titleBtn.dataset.key !== key) {
+    titleBtn.dataset.key = key;
+    titleProject.textContent = project;
+    titleText.textContent = title;
+    titleBtn.classList.toggle('bare', !project);
+    titleBtn.classList.toggle('is-live', liveDot);
+    titleBtn.title = project ? `${project} — ${title}` : title;
+  }
   updateEmptyState();
   if (render) renderPanels();
 }
@@ -448,7 +435,7 @@ function updateEmptyState() {
   if (!show) return;
   const head = connected ? 'No live sessions' : transport.connecting ? 'Connecting…' : 'Disconnected';
   const sub = connected
-    ? 'Start a coding agent (Claude Code, Codex, opencode, Copilot) in any project, pick a past session above, or import a replay.'
+    ? 'Start a coding agent (Claude Code, Codex, opencode, Copilot) in any project, press ⌘K to pick a past session, or import a replay.'
     : 'Reconnecting to the local transcript stream…';
   emptyEl.innerHTML = html`<div class="empty-card"><span class="empty-dot ${connected ? 'on' : ''}"></span><h2>${head}</h2><p>${sub}</p>${connected ? raw('<button id="emptyImport" class="amber">Import a replay</button>') : ''}</div>`.s;
   const b = document.getElementById('emptyImport');
@@ -460,28 +447,89 @@ function setGraphInert(inert: boolean) {
   homeRoot.toggleAttribute('inert', inert);
 }
 
+// ---------- popover ----------
+
+interface PopItem { label: string; hint?: string; on?: boolean; run?: () => void }
+let popoverClose: (() => void) | null = null;
+let popoverAnchor: HTMLElement | null = null;
+
+function togglePopover(anchor: HTMLElement, items: PopItem[]) {
+  if (popoverAnchor === anchor) { closePopover(); return; }
+  closePopover();
+  const el = document.createElement('div');
+  el.className = 'popover';
+  el.setAttribute('role', 'menu');
+  for (const it of items) {
+    if (it.run) {
+      const b = document.createElement('button');
+      b.className = 'pop-item' + (it.on ? ' on' : '');
+      b.setAttribute('role', 'menuitem');
+      b.innerHTML = html`<i>${it.on ? '✓' : ''}</i><span>${it.label}</span>${it.hint ? html`<em>${it.hint}</em>` : ''}`.s;
+      b.onclick = () => { closePopover(); it.run!(); };
+      el.append(b);
+    } else {
+      const d = document.createElement('div');
+      d.className = 'pop-row';
+      d.innerHTML = html`<span>${it.label}</span>${it.hint ? html`<em>${it.hint}</em>` : ''}`.s;
+      el.append(d);
+    }
+  }
+  document.body.append(el);
+  const r = anchor.getBoundingClientRect();
+  el.style.bottom = `${window.innerHeight - r.top + 8}px`;
+  if (r.left + r.right > window.innerWidth) el.style.right = `${Math.max(8, window.innerWidth - r.right)}px`;
+  else el.style.left = `${r.left}px`;
+  const onDown = (e: PointerEvent) => { if (!el.contains(e.target as Node)) closePopover(); };
+  const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); closePopover(); } };
+  document.addEventListener('pointerdown', onDown, true);
+  document.addEventListener('keydown', onKey, true);
+  popoverAnchor = anchor;
+  popoverClose = () => {
+    el.remove();
+    document.removeEventListener('pointerdown', onDown, true);
+    document.removeEventListener('keydown', onKey, true);
+    popoverClose = null; popoverAnchor = null;
+  };
+}
+
+function closePopover() { popoverClose?.(); }
+
+const SPEEDS = [0.5, 1, 2, 4, 16, 64];
+const SHORTCUTS: Array<[string, string]> = [
+  ['Play / pause', 'space'],
+  ['Step event', '← →'],
+  ['Fit view', 'f'],
+  ['Toggle completed agents', 'c'],
+  ['Filter agents', '/'],
+  ['Command palette', '⌘K'],
+  ['Pan · zoom · fit', 'drag · scroll · dbl-click'],
+  ['Import replay', 'drop AWV JSON'],
+];
+
 // ---------- controls ----------
 
 document.getElementById('homeBtn')!.onclick = () => { location.hash = ''; };
-picker.onchange = () => {
-  if (picker.value === '__imported') { if (imported) setActive(imported); return; }
-  location.hash = picker.value === 'all-live' ? '#/live' : `#/s/${picker.value}`;
-};
-sourceFilterEl.onchange = () => { sourceFilter = sourceFilterEl.value as SessionSource | 'all'; renderPicker(); };
-(document.getElementById('layout') as HTMLSelectElement).onchange = e => { renderer.layout = (e.target as HTMLSelectElement).value as LayoutMode; putSettings({ layout: renderer.layout }); };
-(document.getElementById('palette') as HTMLSelectElement).onchange = e => { renderer.palette = (e.target as HTMLSelectElement).value as PaletteName; putSettings({ palette: renderer.palette }); };
-document.getElementById('fit')!.onclick = () => renderer.fit();
+titleBtn.onclick = () => palette.toggle();
 document.getElementById('fitBtn')!.onclick = () => renderer.fit();
 document.getElementById('zoomIn')!.onclick = () => renderer.zoomBy(1.3);
 document.getElementById('zoomOut')!.onclick = () => renderer.zoomBy(1 / 1.3);
+const layoutBtn = document.getElementById('layoutBtn')!;
+layoutBtn.onclick = () => togglePopover(layoutBtn, (['organic', 'radial', 'fixed'] as const).map(l => ({
+  label: l, on: renderer.layout === l,
+  run: () => { renderer.layout = l as LayoutMode; putSettings({ layout: l }); },
+})));
+document.getElementById('exportBtn')!.onclick = () => { if (active) exportSession(active.awv); };
+const helpBtn = document.getElementById('helpBtn')!;
+helpBtn.onclick = () => togglePopover(helpBtn, SHORTCUTS.map(([label, hint]) => ({ label, hint })));
 liveBtn.onclick = () => { if (!active?.live) return; livePinned = true; playing = true; simT = active.eng.duration; updateChrome(); };
 playBtn.onclick = () => { if (simT >= (active?.eng.duration || 0) - 1) simT = 0; playing = !playing; livePinned = false; updateChrome(); };
 document.getElementById('back')!.onclick = () => step(-1);
 document.getElementById('fwd')!.onclick = () => step(1);
 document.getElementById('railToggle')!.onclick = () => rail.classList.toggle('closed');
-document.querySelectorAll<HTMLButtonElement>('[data-speed]').forEach(btn => btn.onclick = () => { speed = Number(btn.dataset.speed); document.querySelectorAll('[data-speed]').forEach(b => b.classList.toggle('on', b === btn)); });
-document.getElementById('import')!.onclick = () => fileInput.click();
-document.getElementById('export')!.onclick = () => { if (active) exportSession(active.awv); };
+speedChip.onclick = () => togglePopover(speedChip, SPEEDS.map(v => ({
+  label: `${v}×`, on: speed === v,
+  run: () => { speed = v; speedChip.textContent = `${v}×`; },
+})));
 document.getElementById('settings')!.onclick = () => settingsModal.toggle();
 
 setupImport(fileInput, document.getElementById('dropOverlay')!, (awv) => {
@@ -489,7 +537,6 @@ setupImport(fileInput, document.getElementById('dropOverlay')!, (awv) => {
   livePinned = false; playing = true;
   if (route.view !== 'replay') location.hash = '#/replay';
   else applyRoute(route);
-  renderPicker();
   setActive(imported);
 });
 
@@ -513,6 +560,7 @@ window.addEventListener('keydown', e => {
     return;
   }
   if (e.key === 'Escape') { e.preventDefault(); location.hash = ''; return; }
+  if (e.key === '/') { e.preventDefault(); rail.classList.remove('closed'); focusRailFilter(rail); return; }
   if (e.code === 'Space') { e.preventDefault(); playBtn.click(); }
   else if (e.key === 'ArrowRight') { e.preventDefault(); step(1); }
   else if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1); }

@@ -7,12 +7,29 @@ export function statusMeta(st: string): [string, string] {
 }
 
 interface RailRow { el: HTMLButtonElement; name: HTMLElement; meter: HTMLElement; status: HTMLElement; tok: HTMLElement; last: string }
-interface RailState { body: HTMLElement; count: HTMLElement; toggle: HTMLButtonElement; rows: Map<string, RailRow>; empty: HTMLElement | null; onSelect: (id: string) => void; onToggle?: () => void }
+interface RailState { body: HTMLElement; count: HTMLElement; toggle: HTMLButtonElement; qInput: HTMLInputElement; q: string; rows: Map<string, RailRow>; empty: HTMLElement | null; onSelect: (id: string) => void; onToggle?: () => void; rerender: () => void }
 const rails = new WeakMap<HTMLElement, RailState>();
 
+export function filterAgents<T extends { a: EngineAgent }>(vis: T[], q: string): T[] {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return vis;
+  return vis.filter(v => v.a.def.name.toLowerCase().includes(needle) || (v.a.def.task || '').toLowerCase().includes(needle));
+}
+
+export function focusRailFilter(el: HTMLElement) {
+  rails.get(el)?.qInput.focus();
+}
+
 function railShell(el: HTMLElement): RailState {
-  el.innerHTML = `<div class="rail-head"><span>AGENTS</span><b></b><button class="rail-filter" data-toggle-completed aria-pressed="false" title="Show completed agents (c)">done</button></div><div class="rail-body"></div>`;
-  const st: RailState = { body: el.querySelector('.rail-body')!, count: el.querySelector('.rail-head b')!, toggle: el.querySelector('.rail-filter')!, rows: new Map(), empty: null, onSelect: () => {} };
+  el.innerHTML = `<div class="rail-head">
+    <div class="rail-head-row"><span>AGENTS</span><b></b></div>
+    <div class="rail-head-row"><input class="rail-q" type="text" placeholder="Filter agents… (/)" aria-label="Filter agents" autocomplete="off" spellcheck="false"><button class="rail-filter" data-toggle-completed aria-pressed="false" title="Show completed agents (c)">done</button></div>
+  </div><div class="rail-body"></div>`;
+  const st: RailState = { body: el.querySelector('.rail-body')!, count: el.querySelector('.rail-head b')!, toggle: el.querySelector('.rail-filter')!, qInput: el.querySelector('.rail-q')!, q: '', rows: new Map(), empty: null, onSelect: () => {}, rerender: () => {} };
+  st.qInput.addEventListener('input', () => { st.q = st.qInput.value; st.rerender(); });
+  st.qInput.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { e.stopPropagation(); st.qInput.value = ''; st.q = ''; st.qInput.blur(); st.rerender(); }
+  });
   el.addEventListener('click', e => {
     const target = e.target as HTMLElement;
     const row = target.closest<HTMLElement>('[data-agent]');
@@ -41,12 +58,13 @@ function makeRow(id: string): RailRow {
 export function renderRail(el: HTMLElement, eng: Engine | undefined, t: number, selectedId: string | null, liveNow: number | undefined, onSelect: (id: string) => void, showCompleted = false, onToggleCompleted?: () => void) {
   const st = rails.get(el) || railShell(el);
   st.onSelect = onSelect; st.onToggle = onToggleCompleted;
+  st.rerender = () => renderRail(el, eng, t, selectedId, liveNow, onSelect, showCompleted, onToggleCompleted);
   st.toggle.hidden = !onToggleCompleted;
   st.toggle.classList.toggle('on', showCompleted);
   st.toggle.setAttribute('aria-pressed', String(showCompleted));
   if (!eng) { st.count.textContent = ''; railEmpty(st, 'Waiting for Claude sessions…'); return; }
   let live = 0, done = 0;
-  const vis: Array<{ id: string; a: EngineAgent; status: AgentStatus }> = [];
+  const all: Array<{ id: string; a: EngineAgent; status: AgentStatus }> = [];
   for (const id of eng.order) {
     const a = eng.agents.get(id)!;
     const status = statusAt(a, t, liveNow);
@@ -56,12 +74,13 @@ export function renderRail(el: HTMLElement, eng: Engine | undefined, t: number, 
     // user opts to keep them — useful when reviewing a replay/history. The
     // selected agent always stays so the inspector remains reachable.
     if (status === 'complete' && !showCompleted && selectedId !== id) continue;
-    vis.push({ id, a, status });
+    all.push({ id, a, status });
   }
   st.count.textContent = `${live} live · ${done} done · ${eng.order.length} total`;
+  const vis = filterAgents(all, st.q);
   const seen = new Set(vis.map(v => v.id));
   for (const [id, row] of st.rows) if (!seen.has(id)) { row.el.remove(); st.rows.delete(id); }
-  if (!vis.length) { railEmpty(st, 'No agents yet.'); return; }
+  if (!vis.length) { railEmpty(st, st.q.trim() ? 'No agents match' : 'No agents yet.'); return; }
   if (st.empty) { st.empty.remove(); st.empty = null; }
   let cursor = st.body.firstElementChild;
   for (const v of vis) {
@@ -89,30 +108,49 @@ export function renderRail(el: HTMLElement, eng: Engine | undefined, t: number, 
   }
 }
 
-interface InspRefs { kicker: HTMLElement; kickerText: Text; h2: HTMLElement; pill: HTMLElement; task: HTMLElement; ctx: HTMLElement; stats: HTMLElement; chips: HTMLElement; children: HTMLElement; log: HTMLElement }
-interface InspState { key: string; refs: InspRefs | null; last: Record<string, string>; onSelect: (id: string) => void; onClose: () => void }
+export type LogKind = 'all' | 'tools' | 'messages' | 'errors';
+
+export function logFilter(kind: LogKind, e: { type: string }): boolean {
+  if (kind === 'tools') return e.type === 'tool';
+  if (kind === 'errors') return e.type === 'error' || e.type === 'retry';
+  if (kind === 'messages') return e.type === 'message' || e.type === 'spawn' || e.type === 'complete' || e.type === 'compact';
+  return true;
+}
+
+export function dedupeKicker(parts: Array<string | undefined>): string {
+  const segs = parts.filter((p): p is string => !!p);
+  return segs.filter((p, i) => p !== segs[i - 1]).join(' · ');
+}
+
+interface InspRefs { head: HTMLElement; kickerText: Text; h2: HTMLElement; pill: HTMLElement; task: HTMLElement; ctx: HTMLElement; stats: HTMLElement; chips: HTMLElement; children: HTMLElement; log: HTMLElement; logChips: HTMLElement }
+interface InspState { key: string; refs: InspRefs | null; last: Record<string, string>; logKind: LogKind; onSelect: (id: string) => void; onClose: () => void; rerender: () => void }
 const inspectors = new WeakMap<HTMLElement, InspState>();
 
-export function renderInspector(el: HTMLElement, eng: Engine | undefined, t: number, selectedId: string | null, liveNow: number | undefined, onSelect: (id: string) => void, onClose: () => void, sourceOf?: (agentId: string) => string | undefined) {
+export function renderInspector(el: HTMLElement, eng: Engine | undefined, t: number, selectedId: string | null, liveNow: number | undefined, onSelect: (id: string) => void, onClose: () => void, sourceOf?: (agentId: string) => string | undefined, sessionMeta?: { cwd?: string; projectName?: string }) {
   let st = inspectors.get(el);
   if (!st) {
-    const s: InspState = { key: '', refs: null, last: {}, onSelect, onClose };
+    const s: InspState = { key: '', refs: null, last: {}, logKind: 'all', onSelect, onClose, rerender: () => {} };
     el.addEventListener('click', e => {
       const target = e.target as HTMLElement;
-      if (target.closest('.close')) s.onClose();
-      else { const c = target.closest<HTMLElement>('[data-child]'); if (c) s.onSelect(c.dataset.child!); }
+      if (target.closest('.close')) { s.onClose(); return; }
+      const c = target.closest<HTMLElement>('[data-child]');
+      if (c) { s.onSelect(c.dataset.child!); return; }
+      const f = target.closest<HTMLElement>('[data-logf]');
+      if (f) { s.logKind = f.dataset.logf as LogKind; delete s.last.log; delete s.last.logChips; s.rerender(); return; }
+      const row = target.closest<HTMLElement>('.log-row');
+      if (row) row.classList.toggle('expanded');
     });
     inspectors.set(el, s);
     st = s;
   }
   st.onSelect = onSelect; st.onClose = onClose;
+  st.rerender = () => renderInspector(el, eng, t, selectedId, liveNow, onSelect, onClose, sourceOf, sessionMeta);
   const sel = selectedId && eng ? eng.agents.get(selectedId) : undefined;
   if (!eng || !sel) { el.hidden = true; el.innerHTML = ''; st.key = ''; st.refs = null; return; }
   el.hidden = false;
   if (st.key !== selectedId) {
     el.innerHTML = `<div class="inspect-card">
-      <button class="close" title="Close" aria-label="Close inspector">×</button>
-      <div class="inspect-kicker"><span></span></div>
+      <div class="inspect-head"><span class="i-dot"></span><div class="inspect-kicker"></div><button class="close" title="Close" aria-label="Close inspector">×</button></div>
       <h2></h2>
       <div class="status-pill"></div>
       <p class="task"></p>
@@ -123,13 +161,13 @@ export function renderInspector(el: HTMLElement, eng: Engine | undefined, t: num
       <h3>Sub-agents</h3>
       <div class="children"></div>
       <h3>Event log</h3>
+      <div class="log-chips" role="group" aria-label="Filter event log"></div>
       <div class="event-log"></div>
     </div>`;
     const q = (sl: string) => el.querySelector<HTMLElement>(sl)!;
-    const kicker = q('.inspect-kicker');
     const kickerText = document.createTextNode('');
-    kicker.appendChild(kickerText);
-    st.refs = { kicker, kickerText, h2: q('h2'), pill: q('.status-pill'), task: q('.task'), ctx: q('.context-box'), stats: q('.i-stats'), chips: q('.chips'), children: q('.children'), log: q('.event-log') };
+    q('.inspect-kicker').appendChild(kickerText);
+    st.refs = { head: q('.inspect-head'), kickerText, h2: q('h2'), pill: q('.status-pill'), task: q('.task'), ctx: q('.context-box'), stats: q('.i-stats'), chips: q('.chips'), children: q('.children'), log: q('.event-log'), logChips: q('.log-chips') };
     st.key = selectedId!;
     st.last = {};
   }
@@ -138,15 +176,18 @@ export function renderInspector(el: HTMLElement, eng: Engine | undefined, t: num
   const status = statusAt(sel, t, liveNow), tok = tokensAt(sel, t), lim = sel.def.limit || 1000000, pct = Math.min(1, tok / lim), [lbl, scol] = statusMeta(status);
   const col = colorOf(sel);
   const src = sourceOf?.(selectedId!);
-  const ktext = ((sel.def.role || 'agent') + ' · ' + (sel.parent ? 'child of ' + (eng.agents.get(sel.parent)?.def.name || sel.parent) : 'root') + (src ? ' · ' + src : '')).toUpperCase();
-  const head = [ktext, sel.def.name, sel.def.task || '', col].join('|');
+  const ktext = dedupeKicker([sel.def.role || 'agent', sel.parent ? 'child of ' + (eng.agents.get(sel.parent)?.def.name || sel.parent) : 'root', src]).toUpperCase();
+  const isRoot = !sel.parent;
+  const taskText = (isRoot && sessionMeta?.cwd && sel.def.task === sessionMeta.cwd && sessionMeta.projectName) ? sessionMeta.projectName : sel.def.task;
+  const head = [ktext, sel.def.name, taskText || '', col].join('|');
   if (last.head !== head) {
     last.head = head;
-    R.kicker.style.setProperty('--agent', col);
+    R.head.style.setProperty('--agent', col);
     R.kickerText.nodeValue = ktext;
     R.h2.textContent = sel.def.name;
-    R.task.textContent = sel.def.task || 'No task metadata available.';
+    R.task.textContent = taskText || 'No task metadata available.';
   }
+  setHtml('logChips', R.logChips, html`${(['all', 'tools', 'messages', 'errors'] as const).map(k => html`<button data-logf="${k}" class="${k === st.logKind ? 'on' : ''}" aria-pressed="${k === st.logKind}">${k}</button>`)}`);
   const pill = lbl + '|' + scol;
   if (last.pill !== pill) {
     last.pill = pill;
@@ -166,6 +207,7 @@ export function renderInspector(el: HTMLElement, eng: Engine | undefined, t: num
   for (let i = sel.evs.length - 1; i >= 0 && log.length < 70; i--) {
     const e = sel.evs[i];
     if (e.t > t) continue;
+    if (!logFilter(st.logKind, e)) continue;
     const time = fmtT(e.t);
     if (e.type === 'spawn') log.push(logRow(time, 'SPAWN', '#72d6ee', sel.parent ? `spawned by ${eng.agents.get(sel.parent)?.def.name || sel.parent}` : 'session started', `+${fmt(e.tokens || 0)}`));
     else if (e.type === 'message' && e.to === sel.id) log.push(logRow(time, '◀ RECV', '#aee8f7', `${e.label || 'message'}${e.from ? ' — from ' + (eng.agents.get(e.from)?.def.name || e.from) : ' — external'}`, `+${fmt(e.tokens || 0)}`));
