@@ -44,7 +44,7 @@ export function tierBadge(stats: SessionStats | undefined): Html {
   if (!stats) return html`<span class="tier-badge pending" title="Analysing…">·</span>`;
   const t = stats.tier;
   const why = `${stats.subagentCount} subagents · ${stats.toolCalls} tool calls · ${stats.compactions} compactions`;
-  return html`<span class="tier-badge ${t}${stats.partial ? ' partial' : ''}" title="${t} — ${why}${stats.partial ? ' · incomplete transcript' : ''}">${TIER_LETTER[t]}<i>${t}</i></span>`;
+  return html`<span class="tier-badge${stats.partial ? ' partial' : ''}" title="${t} — ${why}${stats.partial ? ' · incomplete transcript' : ''}">${TIER_LETTER[t]}</span>`;
 }
 
 /** Aggregate-strip tile. `sub` is a small secondary line. */

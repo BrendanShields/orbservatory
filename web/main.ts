@@ -101,10 +101,17 @@ let showCompleted = false;
 let serverSettings: Settings | null = null;
 let serverBootId: string | undefined;
 
+function cycleTheme() {
+  const order = ['system', 'light', 'dark'] as const;
+  const cur = serverSettings?.theme ?? 'system';
+  putSettings({ theme: order[(order.indexOf(cur) + 1) % order.length] });
+}
+
 const homeView = new HomeView(homeRoot, {
   onOpen: (id) => { location.hash = `#/s/${id}`; },
-  onWatchLive: () => { location.hash = '#/live'; },
   onImport: () => fileInput.click(),
+  onSettings: () => settingsModal.toggle(),
+  onCycleTheme: cycleTheme,
   search: searchServer,
 });
 const palette = new Palette(document.body, {
@@ -119,11 +126,7 @@ palette.bindCommands(() => [
   { id: 'import', label: 'Import session…', run: () => fileInput.click() },
   { id: 'export', label: 'Export session', disabled: !active, run: () => { if (active) exportSession(active.awv); } },
   { id: 'mask', label: `Toggle privacy mask (${serverSettings?.maskProjects ? 'on' : 'off'})`, run: () => putSettings({ maskProjects: !serverSettings?.maskProjects }) },
-  { id: 'theme', label: `Theme: ${serverSettings?.theme ?? 'system'} (cycle)`, run: () => {
-    const order = ['system', 'light', 'dark'] as const;
-    const cur = serverSettings?.theme ?? 'system';
-    putSettings({ theme: order[(order.indexOf(cur) + 1) % order.length] });
-  } },
+  { id: 'theme', label: `Theme: ${serverSettings?.theme ?? 'system'} (cycle)`, run: cycleTheme },
   { id: 'settings', label: 'Settings', run: () => settingsModal.toggle() },
 ]);
 const settingsModal = new SettingsModal(document.getElementById('settingsModal')!, (open) => setGraphInert(open || palette.isOpen));

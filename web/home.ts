@@ -8,12 +8,11 @@ import {
 import { cacheSplitBar, chipList, fmtDur, fmtTokens, fmtUsd, relTime, tierBadge, tile } from './stats-viz';
 import { maskProject } from './privacy';
 
-const compactFiltersMq = window.matchMedia('(max-width: 760px)');
-
 export interface HomeCallbacks {
   onOpen(id: string): void;
-  onWatchLive(): void;
   onImport(): void;
+  onSettings(): void;
+  onCycleTheme(): void;
   /** Server full-text search; resolve null on failure (treated as "no extra ids"). */
   search(q: string): Promise<SearchResponse | null>;
 }
@@ -31,11 +30,17 @@ const SORT_LABELS: Record<SortKey, string> = {
 };
 
 const SKEL = raw('<span class="skel">…</span>');
+const FACETS = ['project', 'source', 'model', 'tier', 'skill', 'tool'] as const;
+type FacetKey = typeof FACETS[number];
+
+interface ColDef { label: string; cls?: string; detail?: boolean; cell(r: HomeRow): Html | string }
 
 export class HomeView {
   private filter: HomeFilter = { ...EMPTY_FILTER };
   private sort: SortKey = 'recent';
   private desc = true;
+  private details = localStorage.getItem('homeDetails') === '1';
+  private insightsOpen = localStorage.getItem('homeInsights') === '1';
   private data: HomeData = { sessions: [], stats: new Map(), pricingConfigured: false, connected: false };
   private searchTimer: number | null = null;
   private searchSeq = 0;
@@ -44,25 +49,38 @@ export class HomeView {
   private filterOpen = false;
   private els: {
     q: HTMLInputElement; live: HTMLButtonElement; filterToggle: HTMLButtonElement; sort: HTMLSelectElement; dir: HTMLButtonElement;
-    facets: HTMLElement; agg: HTMLElement; list: HTMLElement; meta: HTMLElement;
+    detailsBtn: HTMLButtonElement; chips: HTMLElement; facets: HTMLElement; liveStrip: HTMLElement;
+    agg: HTMLElement; list: HTMLElement; meta: HTMLElement; statline: HTMLElement; insights: HTMLButtonElement;
   };
 
   constructor(private root: HTMLElement, private cb: HomeCallbacks) {
     root.innerHTML = `
       <div class="home" role="main">
         <div class="home-head">
+          <div class="brand"><i></i><div><b>AGENT ORCHESTRA</b><span>CLAUDE CODE LIVE VISUALISER</span></div></div>
           <input id="homeQ" class="home-q" type="search" placeholder="Search sessions… (title, project, skills, tools, full text)" aria-label="Search sessions" autocomplete="off" spellcheck="false">
+          <button id="homeImportBtn" class="ghost" title="Import an exported AWV session">Import session</button>
+          <button id="homeTheme" class="ghost icon-btn" aria-label="Cycle theme (system → light → dark)" title="Theme">◐</button>
+          <button id="homeSettings" class="ghost icon-btn" aria-label="Settings" title="Settings">⚙</button>
+        </div>
+        <div class="home-controls">
           <button id="homeFilterToggle" class="ghost filter-toggle" aria-expanded="false" aria-controls="homeFacets">Filters</button>
-          <div id="homeFacets" class="home-facets" role="group" aria-label="Filters"></div>
+          <div id="homeChips" class="facet-chips"></div>
           <button id="homeLive" class="chip-toggle" aria-pressed="false" title="Only live sessions">● live only</button>
           <span class="spacer"></span>
           <label class="sort-wrap">sort <select id="homeSort" class="select compact" aria-label="Sort by">${(Object.keys(SORT_LABELS) as SortKey[]).map((k) => `<option value="${k}">${SORT_LABELS[k]}</option>`).join('')}</select></label>
           <button id="homeDir" class="ghost dir" aria-label="Toggle sort direction" title="Sort direction">↓</button>
-          <button id="homeWatch" class="amber" title="Open the merged live graph">Watch all live</button>
+          <button id="homeDetails" class="chip-toggle" aria-pressed="false" title="Show tier, subagents, tools, cost, skills and model columns">details</button>
         </div>
-        <div id="homeAgg" class="home-agg" aria-label="Aggregate stats for the filtered set"></div>
+        <div id="homeFacets" class="home-facets" role="group" aria-label="Filters" hidden></div>
+        <div id="homeLiveStrip" class="live-strip" role="list" aria-label="Live sessions" hidden></div>
         <div id="homeMeta" class="home-meta" aria-live="polite"></div>
         <div id="homeList" class="home-list"></div>
+        <div class="home-stats">
+          <span id="homeStatline" class="statline"></span>
+          <button id="homeInsights" class="ghost insights-toggle" aria-expanded="false">Insights ▾</button>
+        </div>
+        <div id="homeAgg" class="home-agg" aria-label="Aggregate stats for the filtered set" hidden></div>
       </div>`;
     this.els = {
       q: root.querySelector('#homeQ')!,
@@ -70,18 +88,34 @@ export class HomeView {
       filterToggle: root.querySelector('#homeFilterToggle')!,
       sort: root.querySelector('#homeSort')!,
       dir: root.querySelector('#homeDir')!,
+      detailsBtn: root.querySelector('#homeDetails')!,
+      chips: root.querySelector('#homeChips')!,
       facets: root.querySelector('#homeFacets')!,
+      liveStrip: root.querySelector('#homeLiveStrip')!,
       agg: root.querySelector('#homeAgg')!,
       list: root.querySelector('#homeList')!,
       meta: root.querySelector('#homeMeta')!,
+      statline: root.querySelector('#homeStatline')!,
+      insights: root.querySelector('#homeInsights')!,
     };
     this.els.q.oninput = () => this.onQuery(this.els.q.value);
     this.els.live.onclick = () => { this.filter.liveOnly = !this.filter.liveOnly; this.render(); };
     this.els.filterToggle.onclick = () => { this.filterOpen = !this.filterOpen; this.render(); };
-    compactFiltersMq.addEventListener('change', () => this.render());
     this.els.sort.onchange = () => { this.sort = this.els.sort.value as SortKey; this.render(); };
     this.els.dir.onclick = () => { this.desc = !this.desc; this.render(); };
-    (root.querySelector('#homeWatch') as HTMLButtonElement).onclick = () => cb.onWatchLive();
+    this.els.detailsBtn.onclick = () => {
+      this.details = !this.details;
+      localStorage.setItem('homeDetails', this.details ? '1' : '0');
+      this.render();
+    };
+    this.els.insights.onclick = () => {
+      this.insightsOpen = !this.insightsOpen;
+      localStorage.setItem('homeInsights', this.insightsOpen ? '1' : '0');
+      this.render();
+    };
+    (root.querySelector('#homeImportBtn') as HTMLButtonElement).onclick = () => cb.onImport();
+    (root.querySelector('#homeTheme') as HTMLButtonElement).onclick = () => cb.onCycleTheme();
+    (root.querySelector('#homeSettings') as HTMLButtonElement).onclick = () => cb.onSettings();
   }
 
   focusSearch() { this.els.q.focus(); this.els.q.select(); }
@@ -120,33 +154,34 @@ export class HomeView {
     const rows = buildRows(this.data.sessions, this.data.stats);
     const visible = sortRows(filterRows(rows, this.filter), this.sort, this.desc);
     this.renderFacets(rows);
-    this.renderAgg(visible);
+    this.renderFacetChips();
+    this.renderLiveStrip(rows);
+    this.renderStats(visible);
     this.renderMeta(rows.length, visible.length);
     this.renderList(visible);
     this.els.live.classList.toggle('on', this.filter.liveOnly);
     this.els.live.setAttribute('aria-pressed', String(this.filter.liveOnly));
     const activeFilters = this.activeFilterCount();
-    this.els.filterToggle.hidden = !activeFilters && !compactFiltersMq.matches;
     this.els.filterToggle.classList.toggle('on', this.filterOpen || activeFilters > 0);
     this.els.filterToggle.textContent = activeFilters ? `Filters · ${activeFilters}` : 'Filters';
     this.els.filterToggle.setAttribute('aria-expanded', String(this.filterOpen));
-    this.els.facets.classList.toggle('open', this.filterOpen || activeFilters > 0);
+    this.els.facets.hidden = !this.filterOpen;
+    this.els.detailsBtn.classList.toggle('on', this.details);
+    this.els.detailsBtn.setAttribute('aria-pressed', String(this.details));
     this.els.dir.textContent = this.desc ? '↓' : '↑';
     this.els.sort.value = this.sort;
+    this.els.insights.textContent = this.insightsOpen ? 'Insights ▴' : 'Insights ▾';
+    this.els.insights.setAttribute('aria-expanded', String(this.insightsOpen));
+    this.els.agg.hidden = !this.insightsOpen;
   }
 
   private activeFilterCount(): number {
-    return Number(this.filter.source !== 'all')
-      + Number(this.filter.project !== 'all')
-      + Number(this.filter.model !== 'all')
-      + Number(this.filter.tier !== 'all')
-      + Number(this.filter.skill !== 'all')
-      + Number(this.filter.tool !== 'all');
+    return FACETS.reduce((n, k) => n + Number(this.filter[k] !== 'all'), 0);
   }
 
   private renderFacets(rows: HomeRow[]) {
     const f = facetOptions(rows);
-    const sel = (id: string, label: string, cur: string, opts: string[]) => {
+    const sel = (id: FacetKey, label: string, cur: string, opts: string[]) => {
       const seen = opts.includes(cur) || cur === 'all';
       const show = (o: string) => id === 'project' ? maskProject(o) : o;
       return html`<select class="select compact facet" data-facet="${id}" aria-label="Filter by ${label}">
@@ -165,15 +200,49 @@ export class HomeView {
     ]}`.s;
     this.els.facets.querySelectorAll<HTMLSelectElement>('select.facet').forEach((s) => {
       s.onchange = () => {
-        const k = s.dataset.facet as 'project' | 'source' | 'model' | 'tier' | 'skill' | 'tool';
-        this.setFacet(k, s.value as HomeFilter[typeof k] & string);
+        const k = s.dataset.facet as FacetKey;
+        this.setFacet(k, s.value as HomeFilter[FacetKey] & string);
       };
     });
   }
 
-  private renderAgg(visible: HomeRow[]) {
+  private renderFacetChips() {
+    const active = FACETS.filter((k) => this.filter[k] !== 'all');
+    this.els.chips.innerHTML = html`${active.map((k) => {
+      const v = this.filter[k] as string;
+      return html`<button class="f-chip" data-facet="${k}" title="Remove ${k} filter">${k === 'project' ? maskProject(v) : v} ✕</button>`;
+    })}`.s;
+    this.els.chips.querySelectorAll<HTMLButtonElement>('.f-chip').forEach((b) => {
+      b.onclick = () => this.setFacet(b.dataset.facet as FacetKey, 'all');
+    });
+  }
+
+  private renderLiveStrip(rows: HomeRow[]) {
+    const live = rows.filter((r) => r.sum.live);
+    this.els.liveStrip.hidden = !live.length;
+    if (!live.length) { this.els.liveStrip.innerHTML = ''; return; }
+    this.els.liveStrip.innerHTML = html`${live.map(({ sum, stats }) => html`
+      <button class="live-card" role="listitem" data-id="${sum.id}">
+        <span class="lc-dot"></span>
+        <span class="lc-main"><b>${maskProject(sum.projectName || sum.project)}</b><span>${sum.title || sum.id.slice(0, 8)}</span></span>
+        <span class="lc-side">${stats ? fmtTokens(stats.tokens.total) : '…'}<em>${sum.source}</em></span>
+      </button>`)}`.s;
+    this.els.liveStrip.querySelectorAll<HTMLButtonElement>('.live-card').forEach((c) => {
+      c.onclick = () => this.cb.onOpen(c.dataset.id!);
+    });
+  }
+
+  private renderStats(visible: HomeRow[]) {
     const a = aggregate(visible);
     const t = a.tokens;
+    const bits = [
+      `${a.count} sessions`,
+      `${fmtTokens(t.total)} tokens`,
+      `${fmtTokens(a.toolCalls)} tool calls`,
+    ];
+    if (this.data.pricingConfigured && a.costUsd > 0) bits.push(fmtUsd(a.costUsd));
+    this.els.statline.textContent = bits.join(' · ');
+    if (!this.insightsOpen) { this.els.agg.innerHTML = ''; return; }
     const tiles = [
       tile('sessions', String(a.count), { sub: `${a.liveCount} live · ${a.statsReady}/${a.count} analysed` }),
       tile('tokens', fmtTokens(t.total), {
@@ -202,10 +271,35 @@ export class HomeView {
     this.els.meta.hidden = !bits.length;
   }
 
+  private cols(usd: boolean): ColDef[] {
+    const sk = (v: string | Html | false | undefined): string | Html => v || SKEL;
+    return [
+      { label: 'session', cls: 't-title', cell: ({ sum }) => {
+        const title = sum.title || sum.id.slice(0, 8);
+        return html`<b>${title}</b><span>${maskProject(sum.projectName || sum.project)} · ${sum.source}</span>`;
+      } },
+      { label: 'when', cls: 't-when', cell: ({ sum, stats }) => html`<span title="${new Date(stats?.lastActive || sum.lastActive).toLocaleString()}">${relTime(stats?.lastActive || sum.lastActive)}</span>` },
+      { label: 'dur', cell: ({ stats }) => sk(stats && (stats.durationMs >= 3_600_000 ? fmtDur(stats.durationMs) : fmtT(stats.durationMs))) },
+      { label: 'tier', detail: true, cell: ({ stats }) => tierBadge(stats) },
+      { label: 'sub', cls: 'num', detail: true, cell: ({ stats }) => sk(stats && String(stats.subagentCount)) },
+      { label: 'tools', cls: 'num', detail: true, cell: ({ stats }) => sk(stats && String(stats.toolCalls)) },
+      { label: 'tokens', cls: 'num t-tok', cell: ({ stats }) => sk(stats && html`${fmtTokens(stats.tokens.total)}${cacheSplitBar(stats.tokens)}`) },
+      ...(usd ? [{ label: '$', cls: 'num', detail: true, cell: ({ stats }: HomeRow) => sk(stats && (stats.costUsd != null ? fmtUsd(stats.costUsd) : '—')) }] : []),
+      { label: 'skills', cls: 't-skills', detail: true, cell: ({ stats }) => {
+        const skills = stats ? Object.entries(stats.skills).sort((a, b) => b[1] - a[1]).slice(0, 3) : [];
+        return skills.length ? html`${skills.map(([s]) => html`<span class="chip">${s}</span>`)}` : stats ? raw('<span class="chip none">—</span>') : SKEL;
+      } },
+      { label: 'model', cls: 't-model', detail: true, cell: ({ stats }) => stats?.models.length
+        ? html`${shortModel(stats.models[stats.models.length - 1])}${stats.models.length > 1 ? ` +${stats.models.length - 1}` : ''}`
+        : SKEL },
+      { label: 'status', cell: ({ sum, stats }) => html`${raw(sum.live ? '<span class="st live">● live</span>' : '<span class="st done">done</span>')}${stats?.partial ? raw('<span class="st part" title="Transcript could not be fully parsed">incomplete</span>') : ''}` },
+    ];
+  }
+
   private renderList(visible: HomeRow[]) {
     if (!this.data.sessions.length) {
-      this.els.list.innerHTML = html`<div class="home-empty"><h2>${this.data.connected ? 'No sessions yet' : 'Connecting…'}</h2><p>${this.data.connected ? 'Start a coding agent (Claude Code, Codex, opencode, Copilot) in any project — sessions appear here automatically. Or import a replay.' : 'Reconnecting to the local transcript stream…'}</p>${this.data.connected ? raw('<button id="homeImport" class="amber">Import a replay</button>') : ''}</div>`.s;
-      const b = this.els.list.querySelector<HTMLButtonElement>('#homeImport');
+      this.els.list.innerHTML = html`<div class="home-empty"><h2>${this.data.connected ? 'No sessions yet' : 'Connecting…'}</h2><p>${this.data.connected ? 'Start a coding agent (Claude Code, Codex, opencode, Copilot) in any project — sessions appear here automatically. Or import a replay.' : 'Reconnecting to the local transcript stream…'}</p>${this.data.connected ? raw('<button id="homeImportEmpty" class="ghost">Import a replay</button>') : ''}</div>`.s;
+      const b = this.els.list.querySelector<HTMLButtonElement>('#homeImportEmpty');
       if (b) b.onclick = () => this.cb.onImport();
       return;
     }
@@ -213,29 +307,11 @@ export class HomeView {
       this.els.list.innerHTML = html`<div class="home-empty"><h2>No matches</h2><p>No sessions match the current filters${this.filter.text.trim() ? ' or search' : ''}. Clear a filter or broaden the query.</p></div>`.s;
       return;
     }
-    const usd = this.data.pricingConfigured;
-    const head = html`<tr><th>session</th><th>when</th><th>dur</th><th>tier</th><th class="num">sub</th><th class="num">tools</th><th class="num">tokens</th>${usd ? raw('<th class="num">$</th>') : ''}<th>skills</th><th>model</th><th>status</th></tr>`;
-    const sk = (v: string | Html | false | undefined): string | Html => v || SKEL;
-    const body = visible.map(({ sum, stats }) => {
-      const title = sum.title || sum.id.slice(0, 8);
-      const skills = stats ? Object.entries(stats.skills).sort((a, b) => b[1] - a[1]).slice(0, 3) : [];
-      const model = stats?.models.length
-        ? html`${shortModel(stats.models[stats.models.length - 1])}${stats.models.length > 1 ? ` +${stats.models.length - 1}` : ''}`
-        : SKEL;
-      return html`<tr class="srow" data-id="${sum.id}" tabindex="0" role="link" aria-label="Open session ${title}">
-        <td class="t-title"><b>${title}</b><span>${maskProject(sum.projectName || sum.project)} · ${sum.source}</span></td>
-        <td class="t-when" title="${new Date(stats?.lastActive || sum.lastActive).toLocaleString()}">${relTime(stats?.lastActive || sum.lastActive)}</td>
-        <td>${sk(stats && (stats.durationMs >= 3_600_000 ? fmtDur(stats.durationMs) : fmtT(stats.durationMs)))}</td>
-        <td>${tierBadge(stats)}</td>
-        <td class="num">${sk(stats && String(stats.subagentCount))}</td>
-        <td class="num">${sk(stats && String(stats.toolCalls))}</td>
-        <td class="num t-tok">${sk(stats && html`${fmtTokens(stats.tokens.total)}${cacheSplitBar(stats.tokens)}`)}</td>
-        ${usd ? html`<td class="num">${sk(stats && (stats.costUsd != null ? fmtUsd(stats.costUsd) : '—'))}</td>` : ''}
-        <td class="t-skills">${skills.length ? skills.map(([s]) => html`<span class="chip">${s}</span>`) : stats ? raw('<span class="chip none">—</span>') : SKEL}</td>
-        <td class="t-model">${model}</td>
-        <td>${raw(sum.live ? '<span class="st live">● live</span>' : '<span class="st done">done</span>')}${stats?.partial ? raw('<span class="st part" title="Transcript could not be fully parsed">incomplete</span>') : ''}</td>
-      </tr>`;
-    });
+    const cols = this.cols(this.data.pricingConfigured).filter((c) => this.details || !c.detail);
+    const head = html`<tr>${cols.map((c) => html`<th class="${c.cls || ''}">${c.label}</th>`)}</tr>`;
+    const body = visible.map((r) => html`<tr class="srow" data-id="${r.sum.id}" tabindex="0" role="link" aria-label="Open session ${r.sum.title || r.sum.id.slice(0, 8)}">
+      ${cols.map((c) => html`<td class="${c.cls || ''}">${c.cell(r)}</td>`)}
+    </tr>`);
     this.els.list.innerHTML = html`<table class="home-table">${head}${body}</table>`.s;
     this.els.list.querySelectorAll<HTMLTableRowElement>('tr.srow').forEach((tr) => {
       const open = () => this.cb.onOpen(tr.dataset.id!);
