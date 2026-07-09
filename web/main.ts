@@ -10,6 +10,7 @@ import { Transport, searchServer, putSettings } from './transport';
 import { SettingsModal } from './settingsModal';
 import { setupImport, exportSession } from './importer';
 import { setMask, maskProject } from './privacy';
+import { theme } from './theme';
 
 
 interface ViewSession { id: string; awv: AwvSession; eng: Engine; live: boolean; lastIndex: number; startMs: number }
@@ -64,6 +65,7 @@ renderer.setTimeline(document.getElementById('tl') as HTMLCanvasElement);
 const reduceMotionMq = window.matchMedia('(prefers-reduced-motion: reduce)');
 renderer.reduceMotion = reduceMotionMq.matches;
 reduceMotionMq.addEventListener('change', e => { renderer.reduceMotion = e.matches; });
+theme.subscribe(t => { renderer.resolvedTheme = t; });
 const rail = document.getElementById('rail')!;
 const inspector = document.getElementById('inspector')!;
 const playBtn = document.getElementById('play')!;
@@ -117,6 +119,11 @@ palette.bindCommands(() => [
   { id: 'import', label: 'Import session…', run: () => fileInput.click() },
   { id: 'export', label: 'Export session', disabled: !active, run: () => { if (active) exportSession(active.awv); } },
   { id: 'mask', label: `Toggle privacy mask (${serverSettings?.maskProjects ? 'on' : 'off'})`, run: () => putSettings({ maskProjects: !serverSettings?.maskProjects }) },
+  { id: 'theme', label: `Theme: ${serverSettings?.theme ?? 'system'} (cycle)`, run: () => {
+    const order = ['system', 'light', 'dark'] as const;
+    const cur = serverSettings?.theme ?? 'system';
+    putSettings({ theme: order[(order.indexOf(cur) + 1) % order.length] });
+  } },
   { id: 'settings', label: 'Settings', run: () => settingsModal.toggle() },
 ]);
 const settingsModal = new SettingsModal(document.getElementById('settingsModal')!, (open) => setGraphInert(open || palette.isOpen));
@@ -282,6 +289,8 @@ function applyServerSettings(s: Settings) {
   serverSettings = s;
   renderer.palette = s.palette as PaletteName;
   renderer.layout = s.layout as LayoutMode;
+  theme.setSetting(s.theme || 'system');
+  renderer.canvasStyle = s.canvasStyle || 'match';
   renderer.showGrid = !!s.showGrid;
   renderer.showSubagentNames = s.showSubagentNames !== false;
   renderer.showOrchestratorName = s.showOrchestratorName !== false;

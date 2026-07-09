@@ -5,13 +5,67 @@ import { cleanLabel, maskProject } from './privacy';
 
 export type LayoutMode = 'organic' | 'radial' | 'fixed';
 export type PaletteName = 'Deep Teal' | 'Obsidian' | 'Ink Blue' | 'Void Violet' | 'Carbon';
+export type CanvasMode = 'dark' | 'light';
 
-export const PALETTES: Record<PaletteName, { stops: string[]; grid: string; vign: string }> = {
-  'Deep Teal': { stops: ['#0a2029', '#06141a', '#040d12'], grid: 'rgba(140,200,220,.055)', vign: 'rgba(3,10,14,.5)' },
-  'Obsidian': { stops: ['#151518', '#0a0a0d', '#000000'], grid: 'rgba(205,210,220,.05)', vign: 'rgba(0,0,0,.62)' },
-  'Ink Blue': { stops: ['#0a1626', '#050c16', '#01040a'], grid: 'rgba(150,180,225,.055)', vign: 'rgba(1,4,10,.58)' },
-  'Void Violet': { stops: ['#151019', '#0b0710', '#020104'], grid: 'rgba(195,170,225,.05)', vign: 'rgba(2,1,5,.6)' },
-  'Carbon': { stops: ['#1b1b1e', '#101012', '#050506'], grid: 'rgba(212,212,218,.05)', vign: 'rgba(0,0,0,.56)' },
+interface PaletteSkin { stops: string[]; grid: string; vign: string }
+
+export const PALETTES: Record<PaletteName, Record<CanvasMode, PaletteSkin>> = {
+  'Deep Teal': {
+    dark: { stops: ['#0a2029', '#06141a', '#040d12'], grid: 'rgba(140,200,220,.055)', vign: 'rgba(3,10,14,.5)' },
+    light: { stops: ['#f4f9fa', '#e9f2f4', '#dce8ec'], grid: 'rgba(40,90,110,.09)', vign: 'rgba(176,196,204,.35)' },
+  },
+  'Obsidian': {
+    dark: { stops: ['#151518', '#0a0a0d', '#000000'], grid: 'rgba(205,210,220,.05)', vign: 'rgba(0,0,0,.62)' },
+    light: { stops: ['#f7f7f8', '#ededf0', '#dfdfe4'], grid: 'rgba(70,70,85,.08)', vign: 'rgba(185,185,195,.38)' },
+  },
+  'Ink Blue': {
+    dark: { stops: ['#0a1626', '#050c16', '#01040a'], grid: 'rgba(150,180,225,.055)', vign: 'rgba(1,4,10,.58)' },
+    light: { stops: ['#f3f7fc', '#e7eef7', '#d8e3f0'], grid: 'rgba(55,90,140,.09)', vign: 'rgba(172,190,212,.36)' },
+  },
+  'Void Violet': {
+    dark: { stops: ['#151019', '#0b0710', '#020104'], grid: 'rgba(195,170,225,.05)', vign: 'rgba(2,1,5,.6)' },
+    light: { stops: ['#f8f5fb', '#efe9f6', '#e2d9ee'], grid: 'rgba(100,70,140,.08)', vign: 'rgba(190,178,205,.36)' },
+  },
+  'Carbon': {
+    dark: { stops: ['#1b1b1e', '#101012', '#050506'], grid: 'rgba(212,212,218,.05)', vign: 'rgba(0,0,0,.56)' },
+    light: { stops: ['#f6f6f7', '#ebebed', '#dcdce0'], grid: 'rgba(75,75,82,.08)', vign: 'rgba(182,182,188,.38)' },
+  },
+};
+
+interface CanvasTheme {
+  vignInner: string;
+  labelInk: string; labelDim: string; labelShadow: string;
+  tokenText: string; tokenHot: string;
+  ringRgb: string; pdRgb: string; checkRgb: string; selStroke: string; msgRgb: string; errBang: string;
+  haloAlpha: number; haloDarken: number; orbEdge: string;
+  tickMessage: string; tickFallback: string;
+  tlTrack: string; tlP0: string; tlP1: string; tlLine: string; tlHover: string; tlDot: string; tlGlow: string;
+  tlGapFill: string; tlGapHatch: string;
+}
+
+const CANVAS_THEMES: Record<CanvasMode, CanvasTheme> = {
+  dark: {
+    vignInner: 'rgba(4,13,18,0)',
+    labelInk: 'rgba(224,242,248,.92)', labelDim: 'rgba(190,215,224,.5)', labelShadow: 'rgba(4,13,17,.9)',
+    tokenText: 'rgba(150,200,215,.75)', tokenHot: 'rgba(255,150,140,.9)',
+    ringRgb: '200,230,240', pdRgb: '6,16,20', checkRgb: '10,25,30', selStroke: 'rgba(235,250,255,.65)', msgRgb: '232,245,250', errBang: '#fff1ef',
+    haloAlpha: 1, haloDarken: 0, orbEdge: 'rgba(4,12,16,1)',
+    tickMessage: 'rgba(207,230,238,.55)', tickFallback: 'rgba(200,220,230,.4)',
+    tlTrack: 'rgba(150,210,230,.08)', tlP0: 'rgba(43,111,133,.55)', tlP1: 'rgba(122,220,242,.75)',
+    tlLine: 'rgba(234,247,251,.9)', tlHover: 'rgba(234,247,251,.3)', tlDot: '#eaf7fb', tlGlow: '#7adcf2',
+    tlGapFill: 'rgba(4,11,15,.78)', tlGapHatch: 'rgba(150,210,230,.16)',
+  },
+  light: {
+    vignInner: 'rgba(230,240,244,0)',
+    labelInk: 'rgba(18,44,56,.94)', labelDim: 'rgba(60,90,104,.6)', labelShadow: 'rgba(255,255,255,.85)',
+    tokenText: 'rgba(55,95,112,.85)', tokenHot: 'rgba(185,45,35,.95)',
+    ringRgb: '40,70,84', pdRgb: '225,235,239', checkRgb: '245,252,254', selStroke: 'rgba(20,50,64,.6)', msgRgb: '35,80,98', errBang: '#fff5f3',
+    haloAlpha: .3, haloDarken: .45, orbEdge: 'rgba(34,52,60,.92)',
+    tickMessage: 'rgba(60,95,110,.5)', tickFallback: 'rgba(70,100,115,.4)',
+    tlTrack: 'rgba(40,90,110,.1)', tlP0: 'rgba(14,110,140,.4)', tlP1: 'rgba(11,125,158,.8)',
+    tlLine: 'rgba(15,45,58,.85)', tlHover: 'rgba(15,45,58,.3)', tlDot: '#0b6480', tlGlow: 'rgba(14,127,160,.8)',
+    tlGapFill: 'rgba(205,220,226,.85)', tlGapHatch: 'rgba(45,90,108,.25)',
+  },
 };
 
 interface NodeState { id: string; a: EngineAgent; x: number; y: number; vx: number; vy: number; r: number; tx?: number; ty?: number }
@@ -20,7 +74,7 @@ interface NodeState { id: string; a: EngineAgent; x: number; y: number; vx: numb
 const REMOVE_LINGER_MS = 3000;
 const REMOVE_FADE_MS = 800;
 
-const TICK_COLOR: Record<string, string> = { spawn: '#72d6ee', message: 'rgba(207,230,238,.55)', tool: '#f3c47e', compact: '#b4a0f2', error: '#ff7a70', retry: '#84e4c0', complete: '#84e4c0' };
+const TICK_COLOR: Record<string, string> = { spawn: '#72d6ee', tool: '#f3c47e', compact: '#b4a0f2', error: '#ff7a70', retry: '#84e4c0', complete: '#84e4c0' };
 const LENS_R = 60;
 const LENS_MAG = 2.5;
 const NODE_HIT_RADIUS_PX = 22;
@@ -44,6 +98,8 @@ export class VisualRenderer {
   railOpen = true;
   layout: LayoutMode = 'organic';
   palette: PaletteName = 'Deep Teal';
+  resolvedTheme: CanvasMode = 'dark';
+  canvasStyle: 'match' | 'dark' = 'match';
   glow = 1;
   edgeStyle: 'beams' | 'wires' = 'beams';
   showGrid = false;
@@ -425,7 +481,7 @@ export class VisualRenderer {
     const w = cv.clientWidth, h = cv.clientHeight;
     if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
     x.setTransform(dpr, 0, 0, dpr, 0, 0); x.clearRect(0, 0, w, h);
-    const pal = PALETTES[this.palette] || PALETTES['Deep Teal'];
+    const pal = (PALETTES[this.palette] || PALETTES['Deep Teal'])[this.mode()];
     const bg = x.createRadialGradient(w / 2, h * .28, 40, w / 2, h * .28, Math.max(w, h));
     bg.addColorStop(0, pal.stops[0]); bg.addColorStop(.58, pal.stops[1]); bg.addColorStop(1, pal.stops[2]);
     x.fillStyle = bg; x.fillRect(0, 0, w, h);
@@ -436,8 +492,12 @@ export class VisualRenderer {
     x.restore();
     this.drawLabels(t, x, w, h);
     const vg = x.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.38, w / 2, h / 2, Math.max(w, h) * 0.75);
-    vg.addColorStop(0, 'rgba(4,13,18,0)'); vg.addColorStop(1, pal.vign); x.fillStyle = vg; x.fillRect(0, 0, w, h);
+    vg.addColorStop(0, this.theme().vignInner); vg.addColorStop(1, pal.vign); x.fillStyle = vg; x.fillRect(0, 0, w, h);
   }
+
+  /** Effective canvas mode: 'dark' canvasStyle pins the video-editor stage regardless of app theme. */
+  mode(): CanvasMode { return this.canvasStyle === 'dark' ? 'dark' : this.resolvedTheme; }
+  private theme(): CanvasTheme { return CANVAS_THEMES[this.mode()]; }
 
   private drawGrid(x: CanvasRenderingContext2D, w: number, h: number, color: string) {
     x.save(); x.strokeStyle = color; x.lineWidth = 1;
@@ -497,7 +557,7 @@ export class VisualRenderer {
         x.strokeStyle=`rgba(${R},${G},${B},.12)`; x.lineWidth=1; x.beginPath(); x.moveTo(f.x,f.y); x.quadraticCurveTo(c.cx,c.cy,to.x,to.y); x.stroke();
         for(let k=4;k>=0;k--){const tt=pr-k*.045;if(tt<0||tt>1)continue;const q=this.qPt(f.x,f.y,c.cx,c.cy,to.x,to.y,tt), sz=(16-k*2.4)*this.glow; x.drawImage(this.glowSprite(col),q.x-sz/2,q.y-sz/2,sz,sz);}
       } else if (e.type === 'message' && !e.from && e.to && age < 900) {
-        const n=this.nodes.get(e.to); if(n){const pr=age/900; x.strokeStyle=`rgba(232,245,250,${(1-pr)*.5})`; x.lineWidth=1.3; x.beginPath(); x.arc(n.x,n.y,n.r+3+pr*26,0,7); x.stroke();}
+        const n=this.nodes.get(e.to); if(n){const pr=age/900; x.strokeStyle=`rgba(${this.theme().msgRgb},${(1-pr)*.5})`; x.lineWidth=1.3; x.beginPath(); x.arc(n.x,n.y,n.r+3+pr*26,0,7); x.stroke();}
       } else if (e.type === 'tool' && age < 900) {
         const n=this.nodes.get(e.agent); if(n){const pr=age/900; x.strokeStyle=`rgba(243,196,126,${(1-pr)*.4})`; x.lineWidth=1.2; x.beginPath(); x.arc(n.x,n.y,n.r+2+pr*13,0,7); x.stroke();}
       } else if (e.type === 'compact' && age < 900) {
@@ -513,14 +573,15 @@ export class VisualRenderer {
   private drawNode(T: number, x: CanvasRenderingContext2D, n: NodeState, recent: boolean) {
     const a=n.a, gone=this.goneFrac(a,T); if(gone>=1)return; const vis=1-gone, rr=n.r*this.grow(a,T); if(rr<.5)return;
     const col=colorOf(a), status=statusAt(a,T,this.liveNow), tok=tokensAt(a,T), lim=a.def.limit||1000000, pct=Math.min(1,tok/lim), dim=status==='complete'||status==='idle', pd=this.powerDown(a,T), breathe=(status==='active'&&!this.reduceMotion)?1+.08*Math.sin(T/260+hash(a.id)):1;
+    const th=this.theme();
     const halo=rr*(4.6+(recent?1.6:0))*breathe*this.glow*(dim ? .38 : 1)*vis; if(halo>1)x.drawImage(this.glowSprite(status==='error'?'#ff7a70':col),n.x-halo/2,n.y-halo/2,halo,halo);
     x.globalAlpha=(status==='idle'?.48:(status==='complete'?.75-pd*.4:1))*vis; x.drawImage(this.orbSprite(status==='error'?'#ff7a70':col,n.r,dim),n.x-rr,n.y-rr,rr*2,rr*2); x.globalAlpha=1;
-    if(pd>0&&vis>0){x.fillStyle=`rgba(6,16,20,${pd*.66*vis})`;x.beginPath();x.arc(n.x,n.y,rr,0,7);x.fill();}
-    x.strokeStyle=`rgba(200,230,240,${.13*vis})`; x.lineWidth=1.6; x.beginPath(); x.arc(n.x,n.y,rr+4.5,0,7); x.stroke();
+    if(pd>0&&vis>0){x.fillStyle=`rgba(${th.pdRgb},${pd*.66*vis})`;x.beginPath();x.arc(n.x,n.y,rr,0,7);x.fill();}
+    x.strokeStyle=`rgba(${th.ringRgb},${.13*vis})`; x.lineWidth=1.6; x.beginPath(); x.arc(n.x,n.y,rr+4.5,0,7); x.stroke();
     if(pct>.003){x.strokeStyle=ringColor(pct); x.globalAlpha=(dim ? .4 : .95)*(pct>.85&&status==='active'&&!this.reduceMotion? .6+.4*Math.sin(T/130):1)*vis; x.lineWidth=2.4; x.lineCap='round'; x.beginPath(); x.arc(n.x,n.y,rr+4.5,-Math.PI/2,-Math.PI/2+pct*Math.PI*2); x.stroke(); x.globalAlpha=1; x.lineCap='butt';}
-    if(status==='complete'){x.strokeStyle=`rgba(10,25,30,${.85*(1-pd)})`; x.lineWidth=Math.max(1.6,rr*.16); x.lineCap='round'; x.beginPath(); x.moveTo(n.x-rr*.38,n.y+rr*.02); x.lineTo(n.x-rr*.1,n.y+rr*.32); x.lineTo(n.x+rr*.42,n.y-rr*.28); x.stroke(); x.lineCap='butt';}
-    if(status==='error'){x.fillStyle='#fff1ef'; x.font=`700 ${Math.max(9,rr)}px 'JetBrains Mono',monospace`; x.textAlign='center'; x.textBaseline='middle'; x.fillText('!',n.x,n.y+.5);}
-    if(this.selectedId===a.id){x.strokeStyle='rgba(235,250,255,.65)'; x.lineWidth=1.2; x.setLineDash([4,5]); x.lineDashOffset=this.reduceMotion?0:-T/40; x.beginPath(); x.arc(n.x,n.y,rr+10,0,7); x.stroke(); x.setLineDash([]);}
+    if(status==='complete'){x.strokeStyle=`rgba(${th.checkRgb},${.85*(1-pd)})`; x.lineWidth=Math.max(1.6,rr*.16); x.lineCap='round'; x.beginPath(); x.moveTo(n.x-rr*.38,n.y+rr*.02); x.lineTo(n.x-rr*.1,n.y+rr*.32); x.lineTo(n.x+rr*.42,n.y-rr*.28); x.stroke(); x.lineCap='butt';}
+    if(status==='error'){x.fillStyle=th.errBang; x.font=`700 ${Math.max(9,rr)}px 'JetBrains Mono',monospace`; x.textAlign='center'; x.textBaseline='middle'; x.fillText('!',n.x,n.y+.5);}
+    if(this.selectedId===a.id){x.strokeStyle=th.selStroke; x.lineWidth=1.2; x.setLineDash([4,5]); x.lineDashOffset=this.reduceMotion?0:-T/40; x.beginPath(); x.arc(n.x,n.y,rr+10,0,7); x.stroke(); x.setLineDash([]);}
   }
 
   /** Spawn grow-in: 0→1 over 450ms with easeOutBack overshoot; pure function of sim time so scrubbing both directions stays correct. */
@@ -543,28 +604,35 @@ export class VisualRenderer {
       const dense=a.depth<=1||total<=20||n.r*s>12;
       const showName=(nameOn&&dense)||sel||hov, showTok=a.depth<=1||sel||hov;
       if(!showName&&!showTok)continue;
+      const th=this.theme();
       const status=statusAt(a,T,this.liveNow), tok=tokensAt(a,T), lim=a.def.limit||1000000, pct=Math.min(1,tok/lim), fs=Math.max(8.5,Math.min(13,11*Math.sqrt(s)));
-      x.textAlign='center'; x.textBaseline='alphabetic'; x.shadowColor='rgba(4,13,17,.9)'; x.shadowBlur=4;
-      if(showName){const nm=a.parent?cleanLabel(a.def.name):maskProject(cleanLabel(a.def.name)); x.font=`500 ${fs}px Outfit,sans-serif`; x.fillStyle=status==='complete'||status==='idle'?'rgba(190,215,224,.5)':'rgba(224,242,248,.92)'; x.fillText(nm,sx,sy-(n.r+10)*s-4);}
-      if(showTok){x.font=`500 ${Math.max(7.5,fs*.78)}px 'JetBrains Mono',monospace`; x.fillStyle=pct>.85?'rgba(255,150,140,.9)':'rgba(150,200,215,.75)'; x.fillText(`${fmt(tok)} · ${Math.round(pct*100)}%`,sx,sy+(n.r+9)*s+11);} x.shadowBlur=0;
+      x.textAlign='center'; x.textBaseline='alphabetic'; x.shadowColor=th.labelShadow; x.shadowBlur=4;
+      if(showName){const nm=a.parent?cleanLabel(a.def.name):maskProject(cleanLabel(a.def.name)); x.font=`500 ${fs}px Outfit,sans-serif`; x.fillStyle=status==='complete'||status==='idle'?th.labelDim:th.labelInk; x.fillText(nm,sx,sy-(n.r+10)*s-4);}
+      if(showTok){x.font=`500 ${Math.max(7.5,fs*.78)}px 'JetBrains Mono',monospace`; x.fillStyle=pct>.85?th.tokenHot:th.tokenText; x.fillText(`${fmt(tok)} · ${Math.round(pct*100)}%`,sx,sy+(n.r+9)*s+11);} x.shadowBlur=0;
     }
     x.textAlign='center';
     const evs=this.eng.evs;
-    for(let i=this.evLowerBound(T-1700);i<evs.length;i++){const e=evs[i];if(e.t>T)break; const age=T-e.t;if(age>1700)continue; const id=('agent'in e&&e.agent)||(e as any).to; const n=id&&this.nodes.get(id); if(!n)continue; const pr=age/1700, sx=(n.x-cam.x)*s+w/2, sy=(n.y-cam.y)*s+h/2-(n.r+16)*s-14-pr*16; let txt='', col='#f3c47e'; if(e.type==='tool')txt='⚙ '+e.tool; else if(e.type==='compact'){txt='⇣ compact'; col='#b4a0f2';} else if(e.type==='error'){txt='✕ '+cleanLabel(e.label||'error'); col='#ff7a70';} else if(e.type==='retry'){txt='↻ retry'; col='#84e4c0';} if(!txt)continue; x.globalAlpha=Math.min(1,(1-pr)*1.6); x.font=`500 9.5px 'JetBrains Mono',monospace`; x.shadowColor='rgba(4,13,17,.95)'; x.shadowBlur=4; x.fillStyle=col; x.fillText(txt,sx,sy); x.shadowBlur=0; x.globalAlpha=1;}
+    for(let i=this.evLowerBound(T-1700);i<evs.length;i++){const e=evs[i];if(e.t>T)break; const age=T-e.t;if(age>1700)continue; const id=('agent'in e&&e.agent)||(e as any).to; const n=id&&this.nodes.get(id); if(!n)continue; const pr=age/1700, sx=(n.x-cam.x)*s+w/2, sy=(n.y-cam.y)*s+h/2-(n.r+16)*s-14-pr*16; let txt='', col='#f3c47e'; if(e.type==='tool')txt='⚙ '+e.tool; else if(e.type==='compact'){txt='⇣ compact'; col='#b4a0f2';} else if(e.type==='error'){txt='✕ '+cleanLabel(e.label||'error'); col='#ff7a70';} else if(e.type==='retry'){txt='↻ retry'; col='#84e4c0';} if(!txt)continue; x.globalAlpha=Math.min(1,(1-pr)*1.6); x.font=`500 9.5px 'JetBrains Mono',monospace`; x.shadowColor=this.theme().labelShadow; x.shadowBlur=4; x.fillStyle=col; x.fillText(txt,sx,sy); x.shadowBlur=0; x.globalAlpha=1;}
   }
 
   private tlCache: { canvas: HTMLCanvasElement; key: string } | null = null;
 
+  private tick(type: string): string {
+    if (type === 'message') return this.theme().tickMessage;
+    return TICK_COLOR[type] || this.theme().tickFallback;
+  }
+
   drawTL(t: number) {
     const cv=this.tl, x=this.tctx, eng=this.eng; if(!cv||!x||!eng)return; const dpr=devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight; if(cv.width!==Math.round(w*dpr)||cv.height!==Math.round(h*dpr)){cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr);} x.setTransform(dpr,0,0,dpr,0,0); x.clearRect(0,0,w,h); const dur=eng.duration,warp=eng.warp,y=h/2;
+    const th=this.theme();
     // Event ticks are static per engine state — render once to an offscreen layer, blit per frame.
-    const key = `${eng.evs.length}|${dur}|${w}|${h}|${dpr}`;
+    const key = `${eng.evs.length}|${dur}|${w}|${h}|${dpr}|${this.mode()}`;
     if (!this.tlCache || this.tlCache.key !== key) {
       const off = document.createElement('canvas'); off.width = Math.round(w*dpr); off.height = Math.round(h*dpr);
       const ox = off.getContext('2d')!; ox.setTransform(dpr,0,0,dpr,0,0);
-      ox.fillStyle='rgba(150,210,230,.08)'; ox.beginPath(); ox.roundRect(1,y-4,w-2,8,4); ox.fill();
+      ox.fillStyle=th.tlTrack; ox.beginPath(); ox.roundRect(1,y-4,w-2,8,4); ox.fill();
       ox.globalAlpha=.75;
-      for(const e of eng.evs){const ex=1+warp.x(e.t)*(w-2); ox.fillStyle=TICK_COLOR[e.type]||'rgba(200,220,230,.4)'; ox.fillRect(ex,y-8,1.3,16);}
+      for(const e of eng.evs){const ex=1+warp.x(e.t)*(w-2); ox.fillStyle=this.tick(e.type); ox.fillRect(ex,y-8,1.3,16);}
       ox.globalAlpha=1;
       this.tlCache = { canvas: off, key };
       cv.setAttribute('aria-valuemax', String(Math.round(dur / 1000)));
@@ -572,16 +640,16 @@ export class VisualRenderer {
     x.drawImage(this.tlCache.canvas, 0, 0, w, h);
     const lens = this.lensFn(w);
     const px = (lens?.map ?? (p => p))(1 + warp.x(Math.min(dur, Math.max(0, t))) * (w - 2));
-    const gr=x.createLinearGradient(0,0,px,0); gr.addColorStop(0,'rgba(43,111,133,.55)'); gr.addColorStop(1,'rgba(122,220,242,.75)'); x.fillStyle=gr; x.globalAlpha=.85; x.beginPath(); x.roundRect(1,y-4,Math.max(4,px),8,4); x.fill(); x.globalAlpha=1;
+    const gr=x.createLinearGradient(0,0,px,0); gr.addColorStop(0,th.tlP0); gr.addColorStop(1,th.tlP1); x.fillStyle=gr; x.globalAlpha=.85; x.beginPath(); x.roundRect(1,y-4,Math.max(4,px),8,4); x.fill(); x.globalAlpha=1;
     if (lens) this.drawLens(x, w, y, lens, px, gr);
     this.drawTLGaps(x, w, y, lens?.map);
-    x.strokeStyle='rgba(234,247,251,.9)'; x.lineWidth=1.4; x.beginPath(); x.moveTo(px,3); x.lineTo(px,h-3); x.stroke(); x.fillStyle='#eaf7fb'; x.shadowColor='#7adcf2'; x.shadowBlur=8; x.beginPath(); x.arc(px,y,3.4,0,7); x.fill(); x.shadowBlur=0;
+    x.strokeStyle=th.tlLine; x.lineWidth=1.4; x.beginPath(); x.moveTo(px,3); x.lineTo(px,h-3); x.stroke(); x.fillStyle=th.tlDot; x.shadowColor=th.tlGlow; x.shadowBlur=8; x.beginPath(); x.arc(px,y,3.4,0,7); x.fill(); x.shadowBlur=0;
     if (this.tlHover != null && !this.scrub) {
       const rawT = warp.t(this.tlHover);
       const ev = this.nearestEvent(rawT, w - 2);
       const ht = ev ? ev.t : rawT;
       const hx = (lens?.map ?? (p => p))(1 + warp.x(ht) * (w - 2));
-      x.strokeStyle = 'rgba(234,247,251,.3)'; x.lineWidth = 1; x.beginPath(); x.moveTo(hx, 3); x.lineTo(hx, h - 3); x.stroke();
+      x.strokeStyle = th.tlHover; x.lineWidth = 1; x.beginPath(); x.moveTo(hx, 3); x.lineTo(hx, h - 3); x.stroke();
       let label = fmtT(ht);
       if (ev) label += ` · ${ev.type === 'tool' ? ev.tool : ev.type}`;
       else { const g = warp.gaps.find(g => rawT >= g.t0 && rawT < g.t1); if (g) label += ` · ${fmtT(g.t1 - g.t0)} idle`; }
@@ -626,7 +694,7 @@ export class VisualRenderer {
     x.save();
     x.beginPath(); x.rect(x0, y - 13, x1 - x0, 26); x.clip();
     x.clearRect(x0, y - 13, x1 - x0, 26);
-    x.fillStyle = 'rgba(150,210,230,.08)'; x.fillRect(x0, y - 4, x1 - x0, 8);
+    x.fillStyle = this.theme().tlTrack; x.fillRect(x0, y - 4, x1 - x0, 8);
     const tA = warp.t((x0 - 1) / (w - 2)), tB = warp.t((x1 - 1) / (w - 2));
     x.globalAlpha = .75;
     for (let i = this.evLowerBound(tA); i < evs.length; i++) {
@@ -635,7 +703,7 @@ export class VisualRenderer {
       const bp = 1 + warp.x(e.t) * (w - 2);
       const d = Math.min(1, Math.abs(bp - lens.cx) / LENS_R);
       const hh = 8 * (1 + 0.5 * this.lensAmt * (1 - d) * (1 - d));
-      x.fillStyle = TICK_COLOR[e.type] || 'rgba(200,220,230,.4)';
+      x.fillStyle = this.tick(e.type);
       x.fillRect(lens.map(bp), y - hh, 1.3, hh * 2);
     }
     x.globalAlpha = 1;
@@ -653,8 +721,8 @@ export class VisualRenderer {
       if (bw < 2) continue;
       x.save();
       x.beginPath(); x.rect(x0 + 1, y - 5, bw, 10); x.clip();
-      x.fillStyle = 'rgba(4,11,15,.78)'; x.fillRect(x0 + 1, y - 5, bw, 10);
-      x.strokeStyle = 'rgba(150,210,230,.16)'; x.lineWidth = 1;
+      x.fillStyle = this.theme().tlGapFill; x.fillRect(x0 + 1, y - 5, bw, 10);
+      x.strokeStyle = this.theme().tlGapHatch; x.lineWidth = 1;
       x.beginPath();
       for (let gx = x0 - 8; gx < x1 + 8; gx += 6) { x.moveTo(gx, y + 6); x.lineTo(gx + 8, y - 6); }
       x.stroke();
@@ -678,8 +746,8 @@ export class VisualRenderer {
   }
 
   private rgb(hex: string): [number, number, number] { if(!hex.startsWith('#')) return [114,214,238]; const n=parseInt(hex.slice(1),16); return [n>>16&255,n>>8&255,n&255]; }
-  private glowSprite(color: string): HTMLCanvasElement { const k='g'+color; if(!this.sprites[k]){const c=document.createElement('canvas'); c.width=c.height=96; const x=c.getContext('2d')!, [r,g,b]=this.rgb(color), gr=x.createRadialGradient(48,48,2,48,48,48); gr.addColorStop(0,`rgba(${r},${g},${b},.55)`); gr.addColorStop(.35,`rgba(${r},${g},${b},.16)`); gr.addColorStop(1,`rgba(${r},${g},${b},0)`); x.fillStyle=gr; x.fillRect(0,0,96,96); this.sprites[k]=c;} return this.sprites[k]; }
-  private orbSprite(color: string, r: number, dim: boolean): HTMLCanvasElement { const rr=Math.max(4,Math.round(r)), k='o'+color+'|'+rr+(dim?'d':''); if(!this.sprites[k]){const S=rr*4,c=document.createElement('canvas'); c.width=c.height=S; const x=c.getContext('2d')!, [R,G,B]=this.rgb(color), cx=S/2; const gr=x.createRadialGradient(cx-rr*.35,cx-rr*.45,1,cx,cx,rr*1.8); gr.addColorStop(0,`rgba(255,255,255,${dim ? .28 : .75})`); gr.addColorStop(.22,`rgba(${R},${G},${B},${dim ? .45 : .92})`); gr.addColorStop(.72,`rgba(${Math.max(0,R-70)},${Math.max(0,G-70)},${Math.max(0,B-70)},${dim ? .72 : 1})`); gr.addColorStop(1,'rgba(4,12,16,1)'); x.fillStyle=gr; x.beginPath(); x.arc(cx,cx,rr*1.85,0,7); x.fill(); x.strokeStyle=`rgba(${R},${G},${B},${dim ? .28 : .65})`; x.lineWidth=1.6; x.beginPath(); x.arc(cx,cx,rr*1.78,0,7); x.stroke(); this.sprites[k]=c;} return this.sprites[k]; }
+  private glowSprite(color: string): HTMLCanvasElement { const th=this.theme(), k='g'+color+'|'+this.mode(); if(!this.sprites[k]){const c=document.createElement('canvas'); c.width=c.height=96; const x=c.getContext('2d')!; let [r,g,b]=this.rgb(color); if(th.haloDarken>0){r=Math.round(r*(1-th.haloDarken)); g=Math.round(g*(1-th.haloDarken)); b=Math.round(b*(1-th.haloDarken));} const gr=x.createRadialGradient(48,48,2,48,48,48); gr.addColorStop(0,`rgba(${r},${g},${b},${(.55*Math.max(th.haloAlpha,.5)).toFixed(3)})`); gr.addColorStop(.35,`rgba(${r},${g},${b},${(.16*th.haloAlpha+.04).toFixed(3)})`); gr.addColorStop(1,`rgba(${r},${g},${b},0)`); x.fillStyle=gr; x.fillRect(0,0,96,96); this.sprites[k]=c;} return this.sprites[k]; }
+  private orbSprite(color: string, r: number, dim: boolean): HTMLCanvasElement { const th=this.theme(), rr=Math.max(4,Math.round(r)), k='o'+color+'|'+rr+(dim?'d':'')+'|'+this.mode(); if(!this.sprites[k]){const S=rr*4,c=document.createElement('canvas'); c.width=c.height=S; const x=c.getContext('2d')!, [R,G,B]=this.rgb(color), cx=S/2; const gr=x.createRadialGradient(cx-rr*.35,cx-rr*.45,1,cx,cx,rr*1.8); gr.addColorStop(0,`rgba(255,255,255,${dim ? .28 : .75})`); gr.addColorStop(.22,`rgba(${R},${G},${B},${dim ? .45 : .92})`); gr.addColorStop(.72,`rgba(${Math.max(0,R-70)},${Math.max(0,G-70)},${Math.max(0,B-70)},${dim ? .72 : 1})`); gr.addColorStop(1,th.orbEdge); x.fillStyle=gr; x.beginPath(); x.arc(cx,cx,rr*1.85,0,7); x.fill(); x.strokeStyle=`rgba(${R},${G},${B},${dim ? .28 : .65})`; x.lineWidth=1.6; x.beginPath(); x.arc(cx,cx,rr*1.78,0,7); x.stroke(); this.sprites[k]=c;} return this.sprites[k]; }
   private curve(x1:number,y1:number,x2:number,y2:number,h:number){const mx=(x1+x2)/2,my=(y1+y2)/2,dx=x2-x1,dy=y2-y1,d=Math.hypot(dx,dy)||1,bend=((h%200)-100)/100*38; return {cx:mx-dy/d*bend,cy:my+dx/d*bend};}
   private qPt(x1:number,y1:number,cx:number,cy:number,x2:number,y2:number,t:number){const a=(1-t)*(1-t),b=2*(1-t)*t,c=t*t; return {x:a*x1+b*cx+c*x2,y:a*y1+b*cy+c*y2};}
   private powerDown(a: EngineAgent, t: number): number { return a.completeT < Infinity ? Math.min(1, Math.max(0, (t - a.completeT) / 1400)) : 0; }

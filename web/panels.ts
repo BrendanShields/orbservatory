@@ -10,7 +10,7 @@ export function displayName(a: EngineAgent): string {
 }
 
 export function statusMeta(st: string): [string, string] {
-  return ({ pending: ['queued', 'rgba(150,200,215,.45)'], active: ['live', '#7adcf2'], idle: ['idle', 'rgba(150,200,215,.45)'], error: ['error', '#ff7a70'], complete: ['done', 'rgba(132,228,192,.75)'] } as any)[st];
+  return ({ pending: ['queued', 'var(--status-dim)'], active: ['live', 'var(--accent)'], idle: ['idle', 'var(--status-dim)'], error: ['error', 'var(--err)'], complete: ['done', 'var(--status-done)'] } as any)[st];
 }
 
 interface RailRow { el: HTMLButtonElement; name: HTMLElement; meter: HTMLElement; status: HTMLElement; tok: HTMLElement; last: string }
@@ -204,7 +204,9 @@ export function renderInspector(el: HTMLElement, eng: Engine | undefined, t: num
   if (last.pill !== pill) {
     last.pill = pill;
     R.pill.textContent = lbl.toUpperCase();
-    R.pill.style.color = scol; R.pill.style.borderColor = scol + '44'; R.pill.style.background = scol + '12';
+    R.pill.style.color = scol;
+    R.pill.style.borderColor = `color-mix(in srgb, ${scol} 27%, transparent)`;
+    R.pill.style.background = `color-mix(in srgb, ${scol} 8%, transparent)`;
   }
   setHtml('ctx', R.ctx, html`<div><b>${fmt(tok)}</b><span>/ ${fmt(lim)} context</span></div><strong>${Math.round(pct * 100)}%</strong><i><em style="width:${(pct * 100).toFixed(1)}%;background:${ringColor(pct)}"></em></i>`);
   setHtml('stats', R.stats, runStats(sel.def));
@@ -222,14 +224,14 @@ export function renderInspector(el: HTMLElement, eng: Engine | undefined, t: num
     if (!logFilter(st.logKind, e)) continue;
     const time = fmtT(e.t);
     const nameOf = (id: string | undefined) => { const a = id ? eng.agents.get(id) : undefined; return a ? displayName(a) : id; };
-    if (e.type === 'spawn') log.push(logRow(time, 'SPAWN', '#72d6ee', sel.parent ? `spawned by ${nameOf(sel.parent)}` : 'session started', `+${fmt(e.tokens || 0)}`));
-    else if (e.type === 'message' && e.to === sel.id) log.push(logRow(time, '◀ RECV', '#aee8f7', `${e.label || 'message'}${e.from ? ' — from ' + nameOf(e.from) : ' — external'}`, `+${fmt(e.tokens || 0)}`));
-    else if (e.type === 'message' && e.from === sel.id && e.to !== sel.id) log.push(logRow(time, 'SEND ▶', 'rgba(207,230,238,.8)', `${e.label || 'message'} — to ${nameOf(e.to || '')}`, ''));
-    else if (e.type === 'message' && e.from === sel.id) log.push(logRow(time, 'REPLY', 'rgba(207,230,238,.8)', e.label || 'assistant reply', `+${fmt(e.tokens || 0)}`));
-    else if (e.type === 'tool') log.push(logRow(time, 'TOOL', '#f3c47e', `${e.tool}${e.label ? ' — ' + e.label : ''}`, `+${fmt(e.tokens || 0)}`));
-    else if (e.type === 'compact') log.push(logRow(time, 'COMPACT', '#b4a0f2', e.label || 'context compacted', `−${fmt((e as any)._drop || 0)}`));
-    else if (e.type === 'error') log.push(logRow(time, 'ERROR', '#ff7a70', e.label || 'error', ''));
-    else if (e.type === 'complete') log.push(logRow(time, 'DONE', '#84e4c0', e.label || 'completed', ''));
+    if (e.type === 'spawn') log.push(logRow(time, 'SPAWN', 'var(--accent)', sel.parent ? `spawned by ${nameOf(sel.parent)}` : 'session started', `+${fmt(e.tokens || 0)}`));
+    else if (e.type === 'message' && e.to === sel.id) log.push(logRow(time, '◀ RECV', 'var(--accent-bright)', `${e.label || 'message'}${e.from ? ' — from ' + nameOf(e.from) : ' — external'}`, `+${fmt(e.tokens || 0)}`));
+    else if (e.type === 'message' && e.from === sel.id && e.to !== sel.id) log.push(logRow(time, 'SEND ▶', 'rgba(var(--text-mid-rgb),.8)', `${e.label || 'message'} — to ${nameOf(e.to || '')}`, ''));
+    else if (e.type === 'message' && e.from === sel.id) log.push(logRow(time, 'REPLY', 'rgba(var(--text-mid-rgb),.8)', e.label || 'assistant reply', `+${fmt(e.tokens || 0)}`));
+    else if (e.type === 'tool') log.push(logRow(time, 'TOOL', 'var(--warn)', `${e.tool}${e.label ? ' — ' + e.label : ''}`, `+${fmt(e.tokens || 0)}`));
+    else if (e.type === 'compact') log.push(logRow(time, 'COMPACT', 'var(--purple)', e.label || 'context compacted', `−${fmt((e as any)._drop || 0)}`));
+    else if (e.type === 'error') log.push(logRow(time, 'ERROR', 'var(--err)', e.label || 'error', ''));
+    else if (e.type === 'complete') log.push(logRow(time, 'DONE', 'var(--ok-2)', e.label || 'completed', ''));
   }
   const logHtml = (log.length ? html`${log}` : html`<em>No visible events yet</em>`).s;
   if (last.log !== logHtml) {

@@ -67,6 +67,8 @@ export interface TierThresholds {
 export interface Settings {
   palette: string;
   layout: string;
+  theme: 'system' | 'light' | 'dark';
+  canvasStyle: 'match' | 'dark';
   maskProjects: boolean;
   showGrid: boolean;
   showSubagentNames: boolean;

@@ -7,6 +7,8 @@ import { DEFAULT_TIER_THRESHOLDS } from './stats';
 export const DEFAULT_SETTINGS: Settings = {
   palette: 'Deep Teal',
   layout: 'organic',
+  theme: 'system',
+  canvasStyle: 'match',
   maskProjects: false,
   showGrid: false,
   showSubagentNames: true,
@@ -69,6 +71,8 @@ function sanitize(s: Settings): Settings {
   return {
     palette: String(s.palette || DEFAULT_SETTINGS.palette),
     layout: String(s.layout || DEFAULT_SETTINGS.layout),
+    theme: (['system', 'light', 'dark'] as const).includes(s.theme as any) ? s.theme : DEFAULT_SETTINGS.theme,
+    canvasStyle: (['match', 'dark'] as const).includes(s.canvasStyle as any) ? s.canvasStyle : DEFAULT_SETTINGS.canvasStyle,
     maskProjects: Boolean(s.maskProjects),
     showGrid: Boolean(s.showGrid),
     showSubagentNames: s.showSubagentNames !== false,
