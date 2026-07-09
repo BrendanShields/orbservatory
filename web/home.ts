@@ -50,7 +50,7 @@ export class HomeView {
   private els: {
     q: HTMLInputElement; live: HTMLButtonElement; filterToggle: HTMLButtonElement; sort: HTMLSelectElement; dir: HTMLButtonElement;
     detailsBtn: HTMLButtonElement; chips: HTMLElement; facets: HTMLElement; liveStrip: HTMLElement;
-    agg: HTMLElement; list: HTMLElement; meta: HTMLElement; statline: HTMLElement; insights: HTMLButtonElement;
+    aggWrap: HTMLElement; agg: HTMLElement; list: HTMLElement; meta: HTMLElement; statline: HTMLElement; insights: HTMLButtonElement;
   };
 
   constructor(private root: HTMLElement, private cb: HomeCallbacks) {
@@ -58,10 +58,12 @@ export class HomeView {
       <div class="home" role="main">
         <div class="home-head">
           <div class="brand"><i></i><div><b>AGENT ORCHESTRA</b><span>CLAUDE CODE LIVE VISUALISER</span></div></div>
-          <input id="homeQ" class="home-q" type="search" placeholder="Search sessions… (title, project, skills, tools, full text)" aria-label="Search sessions" autocomplete="off" spellcheck="false">
+          <input id="homeQ" class="home-q" type="search" placeholder="⌕ Search sessions… (title, project, skills, tools, full text) (/)" aria-label="Search sessions" autocomplete="off" spellcheck="false">
           <button id="homeImportBtn" class="ghost" title="Import an exported AWV session">Import session</button>
-          <button id="homeTheme" class="ghost icon-btn" aria-label="Cycle theme (system → light → dark)" title="Theme">◐</button>
-          <button id="homeSettings" class="ghost icon-btn" aria-label="Settings" title="Settings">⚙</button>
+          <div class="icon-cluster">
+            <button id="homeTheme" class="cnav-btn" aria-label="Cycle theme (system → light → dark)" title="Theme">◐</button>
+            <button id="homeSettings" class="cnav-btn" aria-label="Settings" title="Settings">⚙</button>
+          </div>
         </div>
         <div class="home-controls">
           <button id="homeFilterToggle" class="ghost filter-toggle" aria-expanded="false" aria-controls="homeFacets">Filters</button>
@@ -72,15 +74,15 @@ export class HomeView {
           <button id="homeDir" class="ghost dir" aria-label="Toggle sort direction" title="Sort direction">↓</button>
           <button id="homeDetails" class="chip-toggle" aria-pressed="false" title="Show tier, subagents, tools, cost, skills and model columns">details</button>
         </div>
-        <div id="homeFacets" class="home-facets" role="group" aria-label="Filters" hidden></div>
-        <div id="homeLiveStrip" class="live-strip" role="list" aria-label="Live sessions" hidden></div>
-        <div id="homeMeta" class="home-meta" aria-live="polite"></div>
-        <div id="homeList" class="home-list"></div>
         <div class="home-stats">
           <span id="homeStatline" class="statline"></span>
-          <button id="homeInsights" class="ghost insights-toggle" aria-expanded="false">Insights ▾</button>
+          <button id="homeInsights" class="ghost insights-toggle" aria-expanded="false">Insights <i class="ins-chev">▾</i></button>
+          <div id="homeLiveStrip" class="live-strip" role="list" aria-label="Live sessions" hidden></div>
         </div>
-        <div id="homeAgg" class="home-agg" aria-label="Aggregate stats for the filtered set" hidden></div>
+        <div id="homeAgg" class="home-agg-wrap"><div id="homeAggInner" class="home-agg" aria-label="Aggregate stats for the filtered set"></div></div>
+        <div id="homeFacets" class="home-facets" role="group" aria-label="Filters" hidden></div>
+        <div id="homeMeta" class="home-meta" aria-live="polite"></div>
+        <div id="homeList" class="home-list"></div>
       </div>`;
     this.els = {
       q: root.querySelector('#homeQ')!,
@@ -92,7 +94,8 @@ export class HomeView {
       chips: root.querySelector('#homeChips')!,
       facets: root.querySelector('#homeFacets')!,
       liveStrip: root.querySelector('#homeLiveStrip')!,
-      agg: root.querySelector('#homeAgg')!,
+      aggWrap: root.querySelector('#homeAgg')!,
+      agg: root.querySelector('#homeAggInner')!,
       list: root.querySelector('#homeList')!,
       meta: root.querySelector('#homeMeta')!,
       statline: root.querySelector('#homeStatline')!,
@@ -170,9 +173,8 @@ export class HomeView {
     this.els.detailsBtn.setAttribute('aria-pressed', String(this.details));
     this.els.dir.textContent = this.desc ? '↓' : '↑';
     this.els.sort.value = this.sort;
-    this.els.insights.textContent = this.insightsOpen ? 'Insights ▴' : 'Insights ▾';
     this.els.insights.setAttribute('aria-expanded', String(this.insightsOpen));
-    this.els.agg.hidden = !this.insightsOpen;
+    this.els.aggWrap.classList.toggle('open', this.insightsOpen);
   }
 
   private activeFilterCount(): number {
@@ -223,9 +225,9 @@ export class HomeView {
     if (!live.length) { this.els.liveStrip.innerHTML = ''; return; }
     this.els.liveStrip.innerHTML = html`${live.map(({ sum, stats }) => html`
       <button class="live-card" role="listitem" data-id="${sum.id}">
-        <span class="lc-dot"></span>
         <span class="lc-main"><b>${maskProject(sum.projectName || sum.project)}</b><span>${sum.title || sum.id.slice(0, 8)}</span></span>
         <span class="lc-side">${stats ? fmtTokens(stats.tokens.total) : '…'}<em>${sum.source}</em></span>
+        <span class="lc-dot"></span>
       </button>`)}`.s;
     this.els.liveStrip.querySelectorAll<HTMLButtonElement>('.live-card').forEach((c) => {
       c.onclick = () => this.cb.onOpen(c.dataset.id!);
@@ -242,7 +244,6 @@ export class HomeView {
     ];
     if (this.data.pricingConfigured && a.costUsd > 0) bits.push(fmtUsd(a.costUsd));
     this.els.statline.textContent = bits.join(' · ');
-    if (!this.insightsOpen) { this.els.agg.innerHTML = ''; return; }
     const tiles = [
       tile('sessions', String(a.count), { sub: `${a.liveCount} live · ${a.statsReady}/${a.count} analysed` }),
       tile('tokens', fmtTokens(t.total), {

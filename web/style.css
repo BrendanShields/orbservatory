@@ -5,6 +5,7 @@
    data-theme) is already correct; light overrides on [data-theme='light']. */
 :root{
   --bg:#06141a;
+  --bg-rgb:6,20,26;
   --bg-2:#0b2027;
   --panel-rgb:8,20,26;
   --scrim-rgb:3,10,14;
@@ -39,6 +40,7 @@
 }
 :root[data-theme='light']{
   --bg:#eef3f5;
+  --bg-rgb:238,243,245;
   --bg-2:#ffffff;
   --panel-rgb:252,254,255;
   --scrim-rgb:200,215,222;
@@ -153,15 +155,15 @@ button:active{transform:scale(.97)}
 
 /* ---------- Sessions Home ---------- */
 .home-root{position:absolute;inset:0;overflow-y:auto}
-.home{max-width:1240px;margin:0 auto;padding:18px 22px 48px;font-family:Outfit,sans-serif;color:var(--text)}
-.home-head{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.home{max-width:1240px;margin:0 auto;padding:0 22px 48px;font-family:Outfit,sans-serif;color:var(--text)}
+.home-head{position:sticky;top:0;z-index:5;display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 -22px 10px;padding:16px 22px;background:rgba(var(--bg-rgb),.86);backdrop-filter:blur(14px);border-bottom:1px solid rgba(var(--chrome-rgb),.08)}
 .home-head .brand{margin-right:6px}
 .home-head .brand b{font-size:12px}
 .home-head .brand span{font-size:7.5px}
-.icon-btn{padding:7px 10px}
+.icon-cluster{display:flex;gap:6px;flex:none}
 .home-q{flex:1 1 260px;min-width:220px;background:rgba(var(--panel-rgb),.9);border:1px solid rgba(var(--accent-rgb),.22);border-radius:8px;padding:8px 12px;color:var(--text-bright);font:inherit;font-size:13px;outline:none}
-.home-q:focus{border-color:rgba(var(--accent-rgb),.55)}
-.home-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:2px 0 8px}
+.home-q:focus{border-color:rgba(var(--accent-rgb),.55);box-shadow:0 0 0 3px rgba(var(--accent-rgb),.14)}
+.home-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:14px 0 0}
 .home-facets{display:flex;gap:6px;flex-wrap:wrap;padding:8px;border:1px solid rgba(var(--chrome-rgb),.14);border-radius:12px;background:rgba(var(--panel-rgb),.5);margin:0 0 8px}
 .home-facets[hidden]{display:none}
 .facet-chips{display:flex;gap:5px;flex-wrap:wrap}
@@ -169,20 +171,26 @@ button:active{transform:scale(.97)}
 .f-chip:hover{background:rgba(var(--accent-rgb),.16)}
 .filter-toggle{display:inline-flex;align-items:center}
 .filter-toggle.on{background:rgba(var(--accent-rgb),.14);border-color:rgba(var(--accent-rgb),.28);color:var(--accent-bright)}
-.live-strip{display:flex;gap:8px;overflow-x:auto;padding:2px 0 8px;scrollbar-gutter:stable}
+.live-strip{display:flex;gap:8px;overflow-x:auto;margin-left:auto;scrollbar-gutter:stable}
 .live-strip[hidden]{display:none}
-.live-card{display:flex;align-items:center;gap:9px;flex:0 0 auto;max-width:300px;border:1px solid rgba(var(--ok-rgb),.3);background:rgba(var(--ok-rgb),.05);border-radius:12px;padding:8px 12px;color:var(--text);text-align:left}
+.live-card{display:flex;align-items:center;gap:8px;flex:0 0 auto;max-width:260px;border:1px solid rgba(var(--ok-rgb),.3);background:rgba(var(--ok-rgb),.05);border-radius:10px;padding:5px 10px;color:var(--text);text-align:left}
 .live-card:hover{background:rgba(var(--ok-rgb),.1)}
-.lc-dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 10px rgba(var(--ok-rgb),.7);flex:none;animation:emptyPulse 2s ease-in-out infinite}
+.lc-dot{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 10px rgba(var(--ok-rgb),.7);flex:none;animation:emptyPulse 2s ease-in-out infinite}
 .lc-main{min-width:0}
-.lc-main b{display:block;font-size:12px;font-weight:600;color:var(--text-bright);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.lc-main span{display:block;font-size:10px;color:rgba(var(--text-dim-rgb),.75);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.lc-side{margin-left:auto;text-align:right;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:rgba(var(--text-mid-rgb),.85);flex:none}
-.lc-side em{display:block;font-style:normal;font-size:8.5px;color:rgba(var(--text-dim-rgb),.55);letter-spacing:.06em;text-transform:uppercase}
-.home-stats{display:flex;align-items:center;gap:12px;margin-top:14px}
+.lc-main b{display:block;font-size:11.5px;font-weight:600;color:var(--text-bright);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lc-main span{display:block;font-size:9.5px;color:rgba(var(--text-dim-rgb),.75);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lc-side{text-align:right;font-family:'JetBrains Mono',monospace;font-size:10px;color:rgba(var(--text-mid-rgb),.85);flex:none}
+.lc-side em{display:block;font-style:normal;font-size:8px;color:rgba(var(--text-dim-rgb),.55);letter-spacing:.06em;text-transform:uppercase}
+.home-stats{display:flex;align-items:center;gap:12px;margin:14px 0 0}
 .statline{font-size:12px;color:rgba(var(--text-mid-rgb),.8)}
-.insights-toggle{font-size:11px;padding:5px 10px}
-.home-agg[hidden]{display:none}
+.insights-toggle{font-size:11px;padding:5px 10px;display:flex;align-items:center;gap:5px}
+.ins-chev{font-style:normal;display:inline-block;transition:transform .18s ease}
+.insights-toggle[aria-expanded="true"] .ins-chev{transform:rotate(180deg)}
+.home-agg-wrap{display:grid;grid-template-rows:0fr;transition:grid-template-rows .28s cubic-bezier(.22,1,.36,1)}
+.home-agg-wrap.open{grid-template-rows:1fr}
+.home-agg-wrap>.home-agg{overflow:hidden;min-height:0}
+.home-agg .tile{animation:rowIn .16s ease-out backwards}
+.home-agg .tile:nth-child(1){animation-delay:0ms}.home-agg .tile:nth-child(2){animation-delay:30ms}.home-agg .tile:nth-child(3){animation-delay:60ms}.home-agg .tile:nth-child(4){animation-delay:90ms}.home-agg .tile:nth-child(5){animation-delay:120ms}.home-agg .tile:nth-child(6){animation-delay:150ms}
 .spacer{flex:1}
 .sort-wrap{display:flex;align-items:center;gap:6px;font-size:11px;color:rgba(var(--text-dim-rgb),.8)}
 .dir{padding:4px 9px}
@@ -281,8 +289,8 @@ td.t-tok{min-width:90px}
 .log-chips button.on{background:rgba(var(--accent-rgb),.16);color:var(--accent-bright);border-color:rgba(var(--accent-rgb),.3)}
 
 @media(max-width:760px){
-  .home{padding:12px 12px 28px}
-  .home-head{align-items:stretch}
+  .home{padding:0 12px 28px}
+  .home-head{align-items:stretch;margin:0 -12px 10px;padding:14px 12px}
   .home-q{flex-basis:100%;min-width:0}
   .home .select.compact{display:block}
   .home-facets .facet{max-width:none;flex:1 1 140px}
