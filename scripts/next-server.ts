@@ -85,10 +85,16 @@ server.listen(port, hostname, () => {
   if (!noOpen) openBrowser(url);
 });
 
+let closing = false;
 const shutdown = () => {
+  if (closing) process.exit(130);
+  closing = true;
+  for (const client of wss.clients) client.terminate();
   wss.close();
   runtime.close();
   server.close(() => process.exit(0));
+  server.closeAllConnections();
+  setTimeout(() => process.exit(0), 2000).unref();
 };
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
