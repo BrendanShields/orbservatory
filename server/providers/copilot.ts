@@ -5,6 +5,7 @@ import type { SessionStore, SessionState } from '../store';
 import type { SessionProvider } from './types';
 import { CopilotNormalizer } from './copilot-normalizer';
 import { tailLines } from './tail';
+import { readFileSlice } from '../fileSlice';
 
 interface CopilotOptions {
   root?: string;
@@ -24,7 +25,7 @@ export class CopilotProvider implements SessionProvider {
   private root: string;
   private pollMs: number;
   private livenessMs: number;
-  private timer: Timer | null = null;
+  private timer: ReturnType<typeof setInterval> | null = null;
   private busy = false;
   private broken = new Set<string>();
 
@@ -141,7 +142,7 @@ export class CopilotProvider implements SessionProvider {
     state.peeked = true;
     const normalizer = state.normalizer as CopilotNormalizer;
     try {
-      const head = await Bun.file(state.rootFile).slice(0, Math.min(size, PEEK_HEAD_BYTES)).text();
+      const head = await readFileSlice(state.rootFile, 0, Math.min(size, PEEK_HEAD_BYTES));
       for (const line of head.split('\n')) {
         if (line.trim()) normalizer.peekLine(line);
       }

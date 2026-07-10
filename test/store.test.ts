@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { SessionStore, type SessionState, type Subscriber } from '../server/store';
+import { SessionStore, type Subscriber } from '../server/store';
 import { TranscriptNormalizer } from '../server/normalizer';
 import type { AwvAgent, AwvEvent, ServerMessage } from '../shared/schema';
 

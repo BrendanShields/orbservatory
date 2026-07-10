@@ -5,6 +5,7 @@ import type { SessionStore, SessionState } from '../store';
 import type { SessionProvider } from './types';
 import { CodexNormalizer, type CodexLineSource } from './codex-normalizer';
 import { tailLines } from './tail';
+import { readFileSlice } from '../fileSlice';
 
 interface CodexOptions {
   root?: string;
@@ -40,7 +41,7 @@ export class CodexProvider implements SessionProvider {
   private root: string;
   private pollMs: number;
   private livenessMs: number;
-  private timer: Timer | null = null;
+  private timer: ReturnType<typeof setInterval> | null = null;
   private busy = false;
   private heads = new Map<string, RolloutHead>();
   private sessionFiles = new Map<string, RolloutFile[]>();
@@ -165,7 +166,7 @@ export class CodexProvider implements SessionProvider {
     state.peeked = true;
     const normalizer = state.normalizer as CodexNormalizer;
     try {
-      const head = await Bun.file(rootPath).slice(0, Math.min(size, PEEK_HEAD_BYTES)).text();
+      const head = await readFileSlice(rootPath, 0, Math.min(size, PEEK_HEAD_BYTES));
       for (const line of head.split('\n')) {
         if (line.trim()) normalizer.peekLine(line);
       }
@@ -182,7 +183,7 @@ export class CodexProvider implements SessionProvider {
   private async headOf(path: string, size: number): Promise<RolloutHead | null> {
     const cached = this.heads.get(path);
     if (cached) return cached;
-    const text = await Bun.file(path).slice(0, Math.min(size, HEAD_PROBE_BYTES)).text().catch(() => '');
+    const text = await readFileSlice(path, 0, Math.min(size, HEAD_PROBE_BYTES)).catch(() => '');
     const nl = text.indexOf('\n');
     if (nl < 0) return null;
     const first = safeJson(text.slice(0, nl));

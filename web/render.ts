@@ -68,7 +68,7 @@ const CANVAS_THEMES: Record<CanvasMode, CanvasTheme> = {
   },
 };
 
-interface NodeState { id: string; a: EngineAgent; x: number; y: number; vx: number; vy: number; r: number; tx?: number; ty?: number }
+interface NodeState { id: string; a: EngineAgent; x: number; y: number; vx: number; vy: number; r: number; hov: number; tx?: number; ty?: number }
 
 // Completed agents linger long enough for the completion flash + power-down, fade out, then detach.
 const REMOVE_LINGER_MS = 3000;
@@ -230,7 +230,12 @@ export class VisualRenderer {
   drawFrame(t: number, dt: number) {
     if (!this.eng) return;
     this.seekAt = t;
-    this.syncNodes(t); this.physics(t, dt); this.updateCam(); this.draw(t); this.drawTL(t);
+    this.syncNodes(t); this.physics(t, dt);
+    for (const n of this.nodes.values()) {
+      const target = this.hoverId === n.id ? 1 : 0;
+      n.hov = this.reduceMotion ? target : n.hov + (target - n.hov) * Math.min(1, dt / 120);
+    }
+    this.updateCam(); this.draw(t); this.drawTL(t);
   }
 
   toWorld(px: number, py: number) {
@@ -334,8 +339,19 @@ export class VisualRenderer {
     return Math.min(1, Math.max(0, (t - a.completeT - (REMOVE_LINGER_MS - REMOVE_FADE_MS)) / REMOVE_FADE_MS));
   }
 
+  /** Distinct rest position per root so concurrent sessions never pile onto a shared origin. */
+  private rootAnchorX = new Map<string, number>();
+
+  private computeRootAnchors() {
+    this.rootAnchorX.clear();
+    if (!this.eng) return;
+    const roots = this.eng.order.filter(id => !this.eng!.agents.get(id)?.parent);
+    roots.forEach((id, i) => this.rootAnchorX.set(id, (i - (roots.length - 1) / 2) * 340));
+  }
+
   private syncNodes(t: number) {
     if (!this.eng) return;
+    this.computeRootAnchors();
     for (const a of this.eng.agents.values()) {
       const alive = t >= a.spawnT && (a.completeT === Infinity || t <= a.completeT + REMOVE_LINGER_MS);
       let n = this.nodes.get(a.id);
@@ -345,9 +361,9 @@ export class VisualRenderer {
         const ang = idx * 2.399963 + a.depth * 1.7 + (hash(a.id) % 628) / 100;
         const sp = this.staticPos.get(a.id);
         const useStatic = this.layout === 'fixed' && sp;
-        const sx = useStatic ? sp!.x : (p ? p.x + Math.cos(ang) * 55 : (idx - 1) * 220);
+        const sx = useStatic ? sp!.x : (p ? p.x + Math.cos(ang) * 55 : (this.rootAnchorX.get(a.id) ?? (idx - 1) * 220));
         const sy = useStatic ? sp!.y : (p ? p.y + Math.sin(ang) * 55 : Math.sin(idx) * 90);
-        n = { id: a.id, a, x: sx, y: sy, vx: 0, vy: 0, r: radius(a) };
+        n = { id: a.id, a, x: sx, y: sy, vx: 0, vy: 0, r: radius(a), hov: 0 };
         this.nodes.set(a.id, n);
       } else if (!alive && n) this.nodes.delete(a.id);
     }
@@ -438,7 +454,8 @@ export class VisualRenderer {
         n.vy += dy / d * f * d * 0.02 * st + dy / d * f * st * 8;
         if (pd > 0) { n.vx -= dx / d * 0.4 * st; n.vy -= dy / d * 0.4 * st; }
       } else if (!p) {
-        n.vx -= n.x * 0.0022 * st; n.vy -= n.y * 0.0022 * st;
+        const ax = this.rootAnchorX.get(n.id) ?? 0;
+        n.vx += (ax - n.x) * 0.0022 * st; n.vy -= n.y * 0.0022 * st;
       }
       n.vx *= Math.pow(0.87, st); n.vy *= Math.pow(0.87, st);
       const sp = Math.hypot(n.vx, n.vy); if (sp > 7) { n.vx *= 7 / sp; n.vy *= 7 / sp; }
@@ -574,10 +591,10 @@ export class VisualRenderer {
     const a=n.a, gone=this.goneFrac(a,T); if(gone>=1)return; const vis=1-gone, rr=n.r*this.grow(a,T); if(rr<.5)return;
     const col=colorOf(a), status=statusAt(a,T,this.liveNow), tok=tokensAt(a,T), lim=a.def.limit||1000000, pct=Math.min(1,tok/lim), dim=status==='complete'||status==='idle', pd=this.powerDown(a,T), breathe=(status==='active'&&!this.reduceMotion)?1+.08*Math.sin(T/260+hash(a.id)):1;
     const th=this.theme();
-    const halo=rr*(4.6+(recent?1.6:0))*breathe*this.glow*(dim ? .38 : 1)*vis; if(halo>1)x.drawImage(this.glowSprite(status==='error'?'#ff7a70':col),n.x-halo/2,n.y-halo/2,halo,halo);
+    const halo=rr*(4.6+(recent?1.6:0)+n.hov*1.3)*breathe*this.glow*(dim ? .38 : 1)*vis; if(halo>1)x.drawImage(this.glowSprite(status==='error'?'#ff7a70':col),n.x-halo/2,n.y-halo/2,halo,halo);
     x.globalAlpha=(status==='idle'?.48:(status==='complete'?.75-pd*.4:1))*vis; x.drawImage(this.orbSprite(status==='error'?'#ff7a70':col,n.r,dim),n.x-rr,n.y-rr,rr*2,rr*2); x.globalAlpha=1;
     if(pd>0&&vis>0){x.fillStyle=`rgba(${th.pdRgb},${pd*.66*vis})`;x.beginPath();x.arc(n.x,n.y,rr,0,7);x.fill();}
-    x.strokeStyle=`rgba(${th.ringRgb},${.13*vis})`; x.lineWidth=1.6; x.beginPath(); x.arc(n.x,n.y,rr+4.5,0,7); x.stroke();
+    x.strokeStyle=`rgba(${th.ringRgb},${(.13+.14*n.hov)*vis})`; x.lineWidth=1.6; x.beginPath(); x.arc(n.x,n.y,rr+4.5,0,7); x.stroke();
     if(pct>.003){x.strokeStyle=ringColor(pct); x.globalAlpha=(dim ? .4 : .95)*(pct>.85&&status==='active'&&!this.reduceMotion? .6+.4*Math.sin(T/130):1)*vis; x.lineWidth=2.4; x.lineCap='round'; x.beginPath(); x.arc(n.x,n.y,rr+4.5,-Math.PI/2,-Math.PI/2+pct*Math.PI*2); x.stroke(); x.globalAlpha=1; x.lineCap='butt';}
     if(status==='complete'){x.strokeStyle=`rgba(${th.checkRgb},${.85*(1-pd)})`; x.lineWidth=Math.max(1.6,rr*.16); x.lineCap='round'; x.beginPath(); x.moveTo(n.x-rr*.38,n.y+rr*.02); x.lineTo(n.x-rr*.1,n.y+rr*.32); x.lineTo(n.x+rr*.42,n.y-rr*.28); x.stroke(); x.lineCap='butt';}
     if(status==='error'){x.fillStyle=th.errBang; x.font=`700 ${Math.max(9,rr)}px 'JetBrains Mono',monospace`; x.textAlign='center'; x.textBaseline='middle'; x.fillText('!',n.x,n.y+.5);}

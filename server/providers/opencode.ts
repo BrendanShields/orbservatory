@@ -1,4 +1,3 @@
-import { Database } from 'bun:sqlite';
 import { existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
@@ -6,19 +5,12 @@ import type { AwvAgent, AwvEvent } from '../../shared/schema';
 import type { SessionStore, SessionState } from '../store';
 import type { SessionProvider } from './types';
 import { OpencodeNormalizer } from './opencode-normalizer';
+import { openOpencodeDb, type OpencodeDb } from './opencode-db';
 
 interface OpencodeOptions {
   dataDir?: string;
   pollMs?: number;
   livenessMs?: number;
-}
-
-interface SessionRow {
-  id: string;
-  parent_id: string | null;
-  time_created: number;
-  time_updated: number;
-  data: string;
 }
 
 export function defaultOpencodeDataDir(): string {
@@ -42,9 +34,9 @@ export class OpencodeProvider implements SessionProvider {
   private dataDir: string;
   private pollMs: number;
   private livenessMs: number;
-  private timer: Timer | null = null;
+  private timer: ReturnType<typeof setInterval> | null = null;
   private busy = false;
-  private db: Database | null = null;
+  private db: OpencodeDb | null = null;
   private disabled = false;
   private timeCursor = 0;
   private parentOf = new Map<string, string | null>();
@@ -109,9 +101,7 @@ export class OpencodeProvider implements SessionProvider {
   async scan() {
     const db = this.open();
     if (!db) return;
-    const rows = db
-      .query<SessionRow, [number]>('SELECT id, parent_id, time_created, time_updated, data FROM session WHERE time_updated > ?1 ORDER BY time_updated ASC')
-      .all(this.timeCursor);
+    const rows = db.sessionsUpdatedAfter(this.timeCursor);
     const changedRoots = new Set<string>();
     for (const row of rows) {
       this.parentOf.set(row.id, row.parent_id);
@@ -120,9 +110,7 @@ export class OpencodeProvider implements SessionProvider {
       changedRoots.add(rootId);
     }
     for (const rootId of changedRoots) {
-      const row = db
-        .query<SessionRow, [string]>('SELECT id, parent_id, time_created, time_updated, data FROM session WHERE id = ?1')
-        .get(rootId);
+      const row = db.sessionById(rootId);
       if (!row) continue;
       const id = `opencode:${rootId}`;
       const state = this.store.upsertSession({
@@ -164,22 +152,16 @@ export class OpencodeProvider implements SessionProvider {
     const normalizer = state.normalizer as OpencodeNormalizer;
     const tree = this.sessionTree(state.sessionId, db);
     for (const sessId of tree) {
-      const row = db
-        .query<SessionRow, [string]>('SELECT id, parent_id, time_created, time_updated, data FROM session WHERE id = ?1')
-        .get(sessId);
+      const row = db.sessionById(sessId);
       if (!row) continue;
       const agents: AwvAgent[] = [];
       const events: AwvEvent[] = [];
       normalizer.applySessionRow(rowData(row), sessId === state.sessionId, agents, events);
       const msgCursor = full ? '' : normalizer.messageCursor(sessId);
-      const messages = db
-        .query<{ id: string; data: string }, [string, string]>('SELECT id, data FROM message WHERE session_id = ?1 AND id > ?2 ORDER BY id ASC')
-        .all(sessId, msgCursor);
+      const messages = db.messagesAfter(sessId, msgCursor);
       for (const m of messages) normalizer.applyMessage(sessId, m.id, rowData(m), agents, events);
       const partCursor = full ? '' : normalizer.partCursor(sessId);
-      const parts = db
-        .query<{ id: string; data: string }, [string, string]>('SELECT id, data FROM part WHERE session_id = ?1 AND id > ?2 ORDER BY id ASC')
-        .all(sessId, partCursor);
+      const parts = db.partsAfter(sessId, partCursor);
       for (const p of parts) normalizer.applyPart(sessId, p.id, rowData(p), agents, events);
       this.store.merge(state, agents, events);
     }
@@ -193,13 +175,12 @@ export class OpencodeProvider implements SessionProvider {
     state.live = live;
   }
 
-  private rootIdOf(id: string, db: Database): string {
+  private rootIdOf(id: string, db: OpencodeDb): string {
     let cur = id;
     for (let i = 0; i < 32; i++) {
       let parent = this.parentOf.get(cur);
       if (parent === undefined) {
-        const row = db.query<{ parent_id: string | null }, [string]>('SELECT parent_id FROM session WHERE id = ?1').get(cur);
-        parent = row ? row.parent_id : null;
+        parent = db.parentById(cur) ?? null;
         this.parentOf.set(cur, parent);
       }
       if (!parent) return cur;
@@ -208,11 +189,10 @@ export class OpencodeProvider implements SessionProvider {
     return cur;
   }
 
-  private sessionTree(rootId: string, db: Database): string[] {
+  private sessionTree(rootId: string, db: OpencodeDb): string[] {
     const out = [rootId];
     for (let i = 0; i < out.length && i < 256; i++) {
-      const kids = db.query<{ id: string }, [string]>('SELECT id FROM session WHERE parent_id = ?1 ORDER BY id ASC').all(out[i]);
-      for (const k of kids) out.push(k.id);
+      out.push(...db.childIds(out[i]));
     }
     return out;
   }
@@ -222,12 +202,12 @@ export class OpencodeProvider implements SessionProvider {
     return this.dbPathCache || join(this.dataDir, 'opencode.db');
   }
 
-  private open(): Database | null {
+  private open(): OpencodeDb | null {
     if (this.db) return this.db;
     const path = findOpencodeDb(this.dataDir);
     if (!path) return null;
     try {
-      this.db = new Database(path, { readonly: true });
+      this.db = openOpencodeDb(path);
       this.dbPathCache = path;
       return this.db;
     } catch (err) {

@@ -118,6 +118,10 @@ export class HomeView {
     this.els.insights.onclick = () => {
       this.insightsOpen = !this.insightsOpen;
       localStorage.setItem('homeInsights', this.insightsOpen ? '1' : '0');
+      if (this.insightsOpen) {
+        this.els.aggWrap.classList.add('opening');
+        window.setTimeout(() => this.els.aggWrap.classList.remove('opening'), 500);
+      }
       this.render();
     };
     (root.querySelector('#homeImportBtn') as HTMLButtonElement).onclick = () => cb.onImport();
@@ -126,6 +130,17 @@ export class HomeView {
   }
 
   focusSearch() { this.els.q.focus(); this.els.q.select(); }
+
+  /** Skip innerHTML (and handler rebinding) when a section's markup is unchanged —
+      live broadcasts re-render every ~200ms and naive replacement replays entry
+      animations, closes open <select> dropdowns, and drops hover states. */
+  private lastHtml = new WeakMap<HTMLElement, string>();
+  private setHtml(el: HTMLElement, s: string): boolean {
+    if (this.lastHtml.get(el) === s) return false;
+    this.lastHtml.set(el, s);
+    el.innerHTML = s;
+    return true;
+  }
 
   update(sessions: SessionSummary[], stats: Map<string, SessionStats>, opts: { pricingConfigured: boolean; connected: boolean }) {
     this.data = { sessions, stats, pricingConfigured: opts.pricingConfigured, connected: opts.connected };
@@ -198,14 +213,15 @@ export class HomeView {
         ${opts.map((o) => html`<option value="${o}"${o === cur ? raw(' selected') : ''}>${show(o)}</option>`)}
       </select>`;
     };
-    this.els.facets.innerHTML = html`${[
+    const changed = this.setHtml(this.els.facets, html`${[
       sel('project', 'project', this.filter.project, f.projects),
       sel('source', 'source', this.filter.source, ['claude', 'codex', 'opencode', 'copilot']),
       sel('model', 'model', this.filter.model, f.models),
       sel('tier', 'tier', this.filter.tier, ['simple', 'moderate', 'complex']),
       sel('skill', 'skill', this.filter.skill, f.skills),
       sel('tool', 'tool', this.filter.tool, f.tools),
-    ]}`.s;
+    ]}`.s);
+    if (!changed) return;
     this.els.facets.querySelectorAll<HTMLSelectElement>('select.facet').forEach((s) => {
       s.onchange = () => {
         const k = s.dataset.facet as FacetKey;
@@ -216,10 +232,10 @@ export class HomeView {
 
   private renderFacetChips() {
     const active = FACETS.filter((k) => this.filter[k] !== 'all');
-    this.els.chips.innerHTML = html`${active.map((k) => {
+    if (!this.setHtml(this.els.chips, html`${active.map((k) => {
       const v = this.filter[k] as string;
       return html`<button class="f-chip" data-facet="${k}" title="Remove ${k} filter">${k === 'project' ? maskProject(v) : v} ✕</button>`;
-    })}`.s;
+    })}`.s)) return;
     this.els.chips.querySelectorAll<HTMLButtonElement>('.f-chip').forEach((b) => {
       b.onclick = () => this.setFacet(b.dataset.facet as FacetKey, 'all');
     });
@@ -228,13 +244,13 @@ export class HomeView {
   private renderLiveStrip(rows: HomeRow[]) {
     const live = rows.filter((r) => r.sum.live);
     this.els.liveStrip.hidden = !live.length;
-    if (!live.length) { this.els.liveStrip.innerHTML = ''; return; }
-    this.els.liveStrip.innerHTML = html`${live.map(({ sum, stats }) => html`
+    if (!live.length) { this.setHtml(this.els.liveStrip, ''); return; }
+    if (!this.setHtml(this.els.liveStrip, html`${live.map(({ sum, stats }) => html`
       <button class="live-card" role="listitem" data-id="${sum.id}">
         <span class="lc-main"><b>${maskProject(sum.projectName || sum.project)}</b><span>${sum.title || sum.id.slice(0, 8)}</span></span>
         <span class="lc-side">${stats ? fmtTokens(stats.tokens.total) : '…'}<em>${sum.source}</em></span>
         <span class="lc-dot"></span>
-      </button>`)}`.s;
+      </button>`)}`.s)) return;
     this.els.liveStrip.querySelectorAll<HTMLButtonElement>('.live-card').forEach((c) => {
       c.onclick = () => this.cb.onOpen(c.dataset.id!);
     });
@@ -266,7 +282,7 @@ export class HomeView {
       <div class="chip-group"><span class="chip-label">top skills</span>${chipList(a.topSkills)}</div>
       <div class="chip-group"><span class="chip-label">top tools</span>${chipList(a.topTools)}</div>
       <div class="chip-group"><span class="chip-label">models</span>${chipList(a.models, fmtTokens)}</div>`;
-    this.els.agg.innerHTML = html`<div class="tiles">${tiles}</div><div class="chip-rows">${chips}</div>`.s;
+    this.setHtml(this.els.agg, html`<div class="tiles">${tiles}</div><div class="chip-rows">${chips}</div>`.s);
   }
 
   private renderMeta(total: number, shown: number) {
@@ -286,12 +302,12 @@ export class HomeView {
         return html`<b>${title}</b><span>${maskProject(sum.projectName || sum.project)} · ${sum.source}</span>`;
       } },
       { label: 'when', cls: 't-when', cell: ({ sum, stats }) => html`<span title="${new Date(stats?.lastActive || sum.lastActive).toLocaleString()}">${relTime(stats?.lastActive || sum.lastActive)}</span>` },
-      { label: 'dur', cell: ({ stats }) => sk(stats && (stats.durationMs >= 3_600_000 ? fmtDur(stats.durationMs) : fmtT(stats.durationMs))) },
-      { label: 'tier', detail: true, cell: ({ stats }) => tierBadge(stats) },
-      { label: 'sub', cls: 'num', detail: true, cell: ({ stats }) => sk(stats && String(stats.subagentCount)) },
-      { label: 'tools', cls: 'num', detail: true, cell: ({ stats }) => sk(stats && String(stats.toolCalls)) },
+      { label: 'dur', cls: 't-dur', cell: ({ stats }) => sk(stats && (stats.durationMs >= 3_600_000 ? fmtDur(stats.durationMs) : fmtT(stats.durationMs))) },
+      { label: 'tier', cls: 't-tier', detail: true, cell: ({ stats }) => tierBadge(stats) },
+      { label: 'sub', cls: 'num t-sub', detail: true, cell: ({ stats }) => sk(stats && String(stats.subagentCount)) },
+      { label: 'tools', cls: 'num t-tools', detail: true, cell: ({ stats }) => sk(stats && String(stats.toolCalls)) },
       { label: 'tokens', cls: 'num t-tok', cell: ({ stats }) => sk(stats && html`${fmtTokens(stats.tokens.total)}${cacheSplitBar(stats.tokens)}`) },
-      ...(usd ? [{ label: '$', cls: 'num', detail: true, cell: ({ stats }: HomeRow) => sk(stats && (stats.costUsd != null ? fmtUsd(stats.costUsd) : '—')) }] : []),
+      ...(usd ? [{ label: '$', cls: 'num t-cost', detail: true, cell: ({ stats }: HomeRow) => sk(stats && (stats.costUsd != null ? fmtUsd(stats.costUsd) : '—')) }] : []),
       { label: 'skills', cls: 't-skills', detail: true, cell: ({ stats }) => {
         const skills = stats ? Object.entries(stats.skills).sort((a, b) => b[1] - a[1]).slice(0, 3) : [];
         return skills.length ? html`${skills.map(([s]) => html`<span class="chip">${s}</span>`)}` : stats ? raw('<span class="chip none">—</span>') : SKEL;
@@ -299,19 +315,19 @@ export class HomeView {
       { label: 'model', cls: 't-model', detail: true, cell: ({ stats }) => stats?.models.length
         ? html`${shortModel(stats.models[stats.models.length - 1])}${stats.models.length > 1 ? ` +${stats.models.length - 1}` : ''}`
         : SKEL },
-      { label: 'status', cell: ({ sum, stats }) => html`${raw(sum.live ? '<span class="st live">● live</span>' : '<span class="st done">done</span>')}${stats?.partial ? raw('<span class="st part" title="Transcript could not be fully parsed">incomplete</span>') : ''}` },
+      { label: 'status', cls: 't-status', cell: ({ sum, stats }) => html`${raw(sum.live ? '<span class="st live">● live</span>' : '<span class="st done">done</span>')}${stats?.partial ? raw('<span class="st part" title="Transcript could not be fully parsed">incomplete</span>') : ''}` },
     ];
   }
 
   private renderList(visible: HomeRow[]) {
     if (!this.data.sessions.length) {
-      this.els.list.innerHTML = html`<div class="home-empty"><h2>${this.data.connected ? 'No sessions yet' : 'Connecting…'}</h2><p>${this.data.connected ? 'Start a coding agent (Claude Code, Codex, opencode, Copilot) in any project — sessions appear here automatically. Or import a replay.' : 'Reconnecting to the local transcript stream…'}</p>${this.data.connected ? raw('<button id="homeImportEmpty" class="ghost">Import a replay</button>') : ''}</div>`.s;
+      if (!this.setHtml(this.els.list, html`<div class="home-empty"><h2>${this.data.connected ? 'No sessions yet' : 'Connecting…'}</h2><p>${this.data.connected ? 'Start a coding agent (Claude Code, Codex, opencode, Copilot) in any project — sessions appear here automatically. Or import a replay.' : 'Reconnecting to the local transcript stream…'}</p>${this.data.connected ? raw('<button id="homeImportEmpty" class="ghost">Import a replay</button>') : ''}</div>`.s)) return;
       const b = this.els.list.querySelector<HTMLButtonElement>('#homeImportEmpty');
       if (b) b.onclick = () => this.cb.onImport();
       return;
     }
     if (!visible.length) {
-      this.els.list.innerHTML = html`<div class="home-empty"><h2>No matches</h2><p>No sessions match the current filters${this.filter.text.trim() ? ' or search' : ''}. Clear a filter or broaden the query.</p></div>`.s;
+      this.setHtml(this.els.list, html`<div class="home-empty"><h2>No matches</h2><p>No sessions match the current filters${this.filter.text.trim() ? ' or search' : ''}. Clear a filter or broaden the query.</p></div>`.s);
       return;
     }
     const pages = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
@@ -328,7 +344,7 @@ export class HomeView {
       <span>${start + 1}–${Math.min(start + PAGE_SIZE, visible.length)} of ${visible.length}</span>
       <button id="pgNext" class="ghost" aria-label="Next page"${this.page >= pages - 1 ? raw(' disabled') : ''}>→</button>
     </div>` : html``;
-    this.els.list.innerHTML = html`<table class="home-table">${head}${body}</table>${pager}`.s;
+    if (!this.setHtml(this.els.list, html`<table class="home-table">${head}${body}</table>${pager}`.s)) return;
     this.els.list.querySelectorAll<HTMLTableRowElement>('tr.srow').forEach((tr) => {
       const open = () => this.cb.onOpen(tr.dataset.id!);
       tr.onclick = open;

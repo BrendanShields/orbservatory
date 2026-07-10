@@ -1,4 +1,5 @@
 import { stat } from 'node:fs/promises';
+import { readFileSlice } from '../fileSlice';
 
 export interface FileCursor {
   offset: number;
@@ -24,7 +25,7 @@ export async function tailLines(
     cursors.set(path, cursor);
   }
   if (st.size === cursor.offset) return;
-  const text = await Bun.file(path).slice(cursor.offset, st.size).text();
+  const text = await readFileSlice(path, cursor.offset, st.size);
   cursor.offset = st.size;
   const parts = (cursor.buffer + text).split(/\r?\n/);
   cursor.buffer = parts.pop() || '';

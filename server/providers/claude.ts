@@ -10,6 +10,7 @@ import type { SessionProvider } from './types';
 import { tailLines } from './tail';
 import { computeSessionStats } from '../stats';
 import { StatsCache, fingerprintOf, type FileStamp } from '../statsCache';
+import { readFileSlice } from '../fileSlice';
 
 interface WatchOptions {
   root?: string;
@@ -38,9 +39,9 @@ export class ClaudeProjectWatcher implements SessionProvider {
   readonly source = 'claude' as const;
   private root: string;
   private pollMs: number;
-  private timer: Timer | null = null;
+  private timer: ReturnType<typeof setInterval> | null = null;
   private watchers = new Map<string, FSWatcher>();
-  private nudgeTimer: Timer | null = null;
+  private nudgeTimer: ReturnType<typeof setTimeout> | null = null;
   private busy = false;
   private livenessMs: number;
   private watchFs: boolean;
@@ -260,13 +261,12 @@ export class ClaudeProjectWatcher implements SessionProvider {
     state.peeked = true;
     const normalizer = this.normalizerOf(state);
     try {
-      const file = Bun.file(state.rootFile);
-      const head = await file.slice(0, Math.min(size, PEEK_HEAD_BYTES)).text();
+      const head = await readFileSlice(state.rootFile, 0, Math.min(size, PEEK_HEAD_BYTES));
       for (const line of head.split('\n')) {
         if (line.trim()) normalizer.peekLine(line);
       }
       if (size > PEEK_HEAD_BYTES + PEEK_TAIL_BYTES) {
-        const tail = await file.slice(size - PEEK_TAIL_BYTES, size).text();
+        const tail = await readFileSlice(state.rootFile, size - PEEK_TAIL_BYTES, size);
         const lines = tail.split('\n');
         lines.shift(); // first line is almost certainly partial
         for (const line of lines) {

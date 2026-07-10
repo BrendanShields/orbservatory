@@ -21,7 +21,7 @@ type Route =
   | { view: 'session'; id: string }
   | { view: 'replay' };
 
-const app = document.getElementById('app')!;
+export function mountApp(app: HTMLElement) {
 app.innerHTML = `
   <div id="homeRoot" class="home-root" hidden></div>
   <div id="graphRoot" class="shell" hidden>
@@ -587,3 +587,4 @@ window.addEventListener('keydown', e => {
   else if (e.key === 'f') renderer.fit();
   else if (e.key === 'c') { showCompleted = !showCompleted; renderPanels(); }
 });
+}
