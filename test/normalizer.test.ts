@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test';
 import { TranscriptNormalizer } from '../server/normalizer';
 
-const rootSource = { sessionId: 's1', project: '-Users-b-dev-demo', cwd: '/Users/b/dev/demo', filePath: '/tmp/s1.jsonl', kind: 'root' as const };
+const rootSource = { sessionId: 's1', project: '-Users-dev-dev-demo', cwd: '/Users/dev/dev/demo', filePath: '/tmp/s1.jsonl', kind: 'root' as const };
 
 test('normalizes root user prompt and assistant tool usage', () => {
-  const n = new TranscriptNormalizer({ sessionId: 's1', project: '-Users-b-dev-demo' });
-  const a = n.normalizeLine(JSON.stringify({ type: 'user', timestamp: '2026-07-06T00:00:00.000Z', cwd: '/Users/b/dev/demo', message: { content: 'build this app' } }), rootSource);
+  const n = new TranscriptNormalizer({ sessionId: 's1', project: '-Users-dev-dev-demo' });
+  const a = n.normalizeLine(JSON.stringify({ type: 'user', timestamp: '2026-07-06T00:00:00.000Z', cwd: '/Users/dev/dev/demo', message: { content: 'build this app' } }), rootSource);
   const b = n.normalizeLine(JSON.stringify({ type: 'assistant', timestamp: '2026-07-06T00:00:01.000Z', message: { usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 5, cache_creation_input_tokens: 0 }, content: [{ type: 'tool_use', id: 't1', name: 'Read', input: { file_path: 'docs/spec.md' } }] } }), rootSource);
   expect(a.events.map(e => e.type)).toEqual(['spawn', 'message']);
   expect(b.events[0]).toMatchObject({ type: 'tool', agent: 'session:s1', tool: 'Read', tokens: 125 });
@@ -21,10 +21,10 @@ test('detects compaction when usage total drops strongly', () => {
 });
 
 test('ai-title wins over summary and prompt; meta lines are skipped', () => {
-  const n = new TranscriptNormalizer({ sessionId: 's1', project: '-Users-b-dev-1-Projects-avand-web' });
-  const meta = n.normalizeLine({ type: 'user', isMeta: true, timestamp: '2026-07-06T00:00:00.000Z', cwd: '/Users/b/dev/1-Projects/avand-web', message: { content: '<local-command-caveat>noise</local-command-caveat>' } }, { ...rootSource, project: '-Users-b-dev-1-Projects-avand-web', cwd: undefined });
+  const n = new TranscriptNormalizer({ sessionId: 's1', project: '-Users-dev-dev-1-Projects-acme-web' });
+  const meta = n.normalizeLine({ type: 'user', isMeta: true, timestamp: '2026-07-06T00:00:00.000Z', cwd: '/Users/dev/dev/1-Projects/acme-web', message: { content: '<local-command-caveat>noise</local-command-caveat>' } }, { ...rootSource, project: '-Users-dev-dev-1-Projects-acme-web', cwd: undefined });
   expect(meta.events.filter(e => e.type === 'message')).toEqual([]);
-  n.normalizeLine({ type: 'user', timestamp: '2026-07-06T00:00:01.000Z', cwd: '/Users/b/dev/1-Projects/avand-web', message: { content: 'fix the login flow' } }, rootSource);
+  n.normalizeLine({ type: 'user', timestamp: '2026-07-06T00:00:01.000Z', cwd: '/Users/dev/dev/1-Projects/acme-web', message: { content: 'fix the login flow' } }, rootSource);
   expect(n.title).toBe('fix the login flow');
   n.normalizeLine({ type: 'summary', summary: 'Login flow repairs' }, rootSource);
   expect(n.title).toBe('Login flow repairs');
@@ -32,25 +32,25 @@ test('ai-title wins over summary and prompt; meta lines are skipped', () => {
   expect(n.title).toBe('Fix login flow');
   n.normalizeLine({ type: 'summary', summary: 'Should not override ai-title' }, rootSource);
   expect(n.title).toBe('Fix login flow');
-  expect(n.projectName).toBe('avand-web');
+  expect(n.projectName).toBe('acme-web');
 });
 
 test('peekLine extracts cwd, title, and start time without events', () => {
-  const n = new TranscriptNormalizer({ sessionId: 's2', project: '-Users-b-dev-1-Projects-avand-web' });
-  n.peekLine(JSON.stringify({ type: 'user', timestamp: '2026-07-06T01:00:00.000Z', cwd: '/Users/b/dev/1-Projects/avand-web', message: { content: 'add dark mode' } }));
+  const n = new TranscriptNormalizer({ sessionId: 's2', project: '-Users-dev-dev-1-Projects-acme-web' });
+  n.peekLine(JSON.stringify({ type: 'user', timestamp: '2026-07-06T01:00:00.000Z', cwd: '/Users/dev/dev/1-Projects/acme-web', message: { content: 'add dark mode' } }));
   n.peekLine(JSON.stringify({ type: 'ai-title', aiTitle: 'Add dark mode toggle' }));
-  expect(n.projectName).toBe('avand-web');
+  expect(n.projectName).toBe('acme-web');
   expect(n.title).toBe('Add dark mode toggle');
   expect(n.startedAt).toBe(Date.parse('2026-07-06T01:00:00.000Z'));
   expect(n.getAgents()).toEqual([]);
 });
 
 test('labels render paths relative to cwd; root task and desc carry no cwd', () => {
-  const n = new TranscriptNormalizer({ sessionId: 's1', project: '-Users-b-dev-demo' });
-  n.normalizeLine({ type: 'user', timestamp: '2026-07-06T00:00:00.000Z', cwd: '/Users/b/dev/demo', message: { content: 'go' } }, rootSource);
+  const n = new TranscriptNormalizer({ sessionId: 's1', project: '-Users-dev-dev-demo' });
+  n.normalizeLine({ type: 'user', timestamp: '2026-07-06T00:00:00.000Z', cwd: '/Users/dev/dev/demo', message: { content: 'go' } }, rootSource);
   const b = n.normalizeLine({ type: 'assistant', timestamp: '2026-07-06T00:00:01.000Z', message: { usage: { input_tokens: 10 }, content: [
-    { type: 'tool_use', id: 't1', name: 'Read', input: { file_path: '/Users/b/dev/demo/src/main.ts' } },
-    { type: 'tool_use', id: 't2', name: 'Edit', input: { file_path: '/Users/b/elsewhere/x.ts' } },
+    { type: 'tool_use', id: 't1', name: 'Read', input: { file_path: '/Users/dev/dev/demo/src/main.ts' } },
+    { type: 'tool_use', id: 't2', name: 'Edit', input: { file_path: '/Users/dev/elsewhere/x.ts' } },
   ] } }, rootSource);
   expect((b.events[0] as any).label).toBe('file_path: src/main.ts');
   expect((b.events[1] as any).label).toBe('file_path: x.ts');

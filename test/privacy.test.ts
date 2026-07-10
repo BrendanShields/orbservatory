@@ -5,8 +5,8 @@ import { relPath } from '../server/normalizer';
 beforeEach(() => setMask(false));
 
 test('cleanLabel collapses absolute paths to basenames', () => {
-  expect(cleanLabel('file_path: /Users/b/dev/app/src/main.ts')).toBe('file_path: main.ts');
-  expect(cleanLabel('Read /Users/b/secret/notes.md and /home/x/other.txt')).toBe('Read notes.md and other.txt');
+  expect(cleanLabel('file_path: /Users/dev/dev/app/src/main.ts')).toBe('file_path: main.ts');
+  expect(cleanLabel('Read /Users/dev/secret/notes.md and /home/x/other.txt')).toBe('Read notes.md and other.txt');
   expect(cleanLabel('~/dev/app/src/util.ts changed')).toBe('util.ts changed');
 });
 
@@ -31,10 +31,10 @@ test('maskProject is identity when off, stable first-seen aliases when on', () =
 });
 
 test('relPath makes cwd-relative, foreign paths collapse to basename', () => {
-  const cwd = '/Users/b/dev/app';
-  expect(relPath('/Users/b/dev/app/src/main.ts', cwd)).toBe('src/main.ts');
-  expect(relPath('/Users/b/other/place/x.ts', cwd)).toBe('x.ts');
-  expect(relPath('/Users/b/dev/app', cwd)).toBe('app');
+  const cwd = '/Users/dev/dev/app';
+  expect(relPath('/Users/dev/dev/app/src/main.ts', cwd)).toBe('src/main.ts');
+  expect(relPath('/Users/dev/other/place/x.ts', cwd)).toBe('x.ts');
+  expect(relPath('/Users/dev/dev/app', cwd)).toBe('app');
   expect(relPath('src/main.ts', cwd)).toBe('src/main.ts');
   expect(relPath('/etc/hosts', undefined)).toBe('hosts');
 });
