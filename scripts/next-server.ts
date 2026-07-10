@@ -9,8 +9,8 @@ import { resolveConfig } from '../server/config';
 import { getRuntime } from '../server/runtime';
 import { allowedHost, allowedOrigin, isLoopbackBind } from '../server/origin';
 
-const dev = process.argv.includes('--dev') || process.env.NODE_ENV !== 'production';
-const noOpen = process.argv.includes('--no-open') || !!process.env.CLAUDE_VIZ_NO_OPEN;
+const dev = process.argv.includes('--dev');
+const noOpen = process.argv.includes('--no-open') || !!process.env.ORBSERVATORY_NO_OPEN || !!process.env.CLAUDE_VIZ_NO_OPEN;
 
 const runtime = getRuntime();
 await runtime.ready;
@@ -80,7 +80,7 @@ wss.on('connection', (ws) => {
 server.listen(port, hostname, () => {
   const displayHost = hostname === '127.0.0.1' || hostname === '0.0.0.0' ? 'localhost' : hostname;
   const url = `http://${displayHost}:${port}`;
-  console.log(`claude-viz listening on ${url}`);
+  console.log(`orbservatory listening on ${url}`);
   if (!noOpen) openBrowser(url);
 });
 

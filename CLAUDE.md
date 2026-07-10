@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with th
 
 ## What this is
 
-**claude-viz** — a local Next.js App Router web app that visualises Claude Code, Codex, opencode, and GitHub Copilot sessions as a live animated agent graph. It watches transcript/session stores, normalizes them into the AWV (Agentic Workflow Visualizer) schema, and streams sessions over WebSocket to a canvas frontend with timeline replay.
+**orbservatory** — a local Next.js App Router web app that visualises Claude Code, Codex, opencode, and GitHub Copilot sessions as a live animated agent graph. It watches transcript/session stores, normalizes them into the AWV (Agentic Workflow Visualizer) schema, and streams sessions over WebSocket to a canvas frontend with timeline replay.
 
 The app runtime is **Next.js on Node** with a small custom server for `/ws`; the test suite still uses **Bun** (`bun test`).
 
@@ -22,7 +22,7 @@ bun test test/store.test.ts # one test file
 bun test -t "pattern"       # tests matching name
 ```
 
-Environment variables: `PORT`, `HOST` (defaults to `127.0.0.1` — loopback-only is a deliberate privacy choice, don't widen it casually), `CLAUDE_PROJECTS_DIR` (alternate Claude transcript root, used by tests), `CLAUDE_VIZ_CONFIG_DIR` (settings location), `CLAUDE_VIZ_NO_OPEN=1` (suppress browser launch).
+Environment variables: `PORT`, `HOST` (defaults to `127.0.0.1` — loopback-only is a deliberate privacy choice, don't widen it casually), `CLAUDE_PROJECTS_DIR` (alternate Claude transcript root, used by tests), `ORBSERVATORY_CONFIG_DIR` (settings location), `ORBSERVATORY_NO_OPEN=1` (suppress browser launch).
 
 ## Architecture
 

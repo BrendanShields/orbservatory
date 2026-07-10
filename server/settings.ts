@@ -23,12 +23,12 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 export function configDir(): string {
-  const override = process.env.CLAUDE_VIZ_CONFIG_DIR;
+  const override = process.env.ORBSERVATORY_CONFIG_DIR || process.env.CLAUDE_VIZ_CONFIG_DIR;
   if (override) return override;
   const p = platform();
-  if (p === 'darwin') return join(homedir(), 'Library', 'Application Support', 'claude-viz');
-  if (p === 'win32') return join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'claude-viz');
-  return join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'claude-viz');
+  if (p === 'darwin') return join(homedir(), 'Library', 'Application Support', 'orbservatory');
+  if (p === 'win32') return join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'orbservatory');
+  return join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'orbservatory');
 }
 
 function settingsFile(): string {
