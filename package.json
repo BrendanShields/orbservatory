@@ -6,7 +6,7 @@
   "author": "Brendan Shields <hello@brendanshields.dev>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/BrendanShields/orbservatory.git"
+    "url": "git+https://github.com/BrendanShields/observatory.git"
   },
   "keywords": [
     "claude-code",
