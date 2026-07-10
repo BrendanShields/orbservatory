@@ -2,6 +2,7 @@
 import { createServer } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import next from 'next';
 import { WebSocketServer } from 'ws';
 import type { ClientMessage } from '../shared/schema';
@@ -18,7 +19,7 @@ const cfg = resolveConfig(runtime.settings.get());
 const hostname = cfg.host;
 const port = cfg.port;
 
-const app = next({ dev, hostname, port });
+const app = next({ dev, hostname, port, dir: fileURLToPath(new URL('..', import.meta.url)) });
 const handle = app.getRequestHandler();
 await app.prepare();
 

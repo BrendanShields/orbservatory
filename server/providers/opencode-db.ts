@@ -28,18 +28,30 @@ interface SQLiteDatabaseSync {
 
 const require = createRequire(import.meta.url);
 
-export function openOpencodeDb(path: string): OpencodeDb {
+function openSqlite(path: string): SQLiteDatabaseSync {
+  if (typeof Bun !== 'undefined') {
+    const { Database } = require('bun:sqlite') as { Database: new (path: string, options: { readonly: boolean }) => SQLiteDatabaseSync };
+    return new Database(path, { readonly: true });
+  }
   const { DatabaseSync } = require('node:sqlite') as {
     DatabaseSync: new (path: string, options: { readOnly: boolean }) => SQLiteDatabaseSync;
   };
-  const db = new DatabaseSync(path, { readOnly: true });
+  return new DatabaseSync(path, { readOnly: true });
+}
+
+export function openOpencodeDb(path: string): OpencodeDb {
+  const db = openSqlite(path);
+  const hasSessionData = !!db.prepare("SELECT 1 FROM pragma_table_info('session') WHERE name = 'data'").get();
+  const sessionCols = hasSessionData
+    ? 'id, parent_id, time_created, time_updated, data'
+    : "id, parent_id, time_created, time_updated, json_object('id', id, 'title', title, 'directory', directory, 'time', json_object('created', time_created, 'updated', time_updated)) AS data";
   return {
     close: () => db.close(),
     sessionsUpdatedAfter: (timeCursor) => db
-      .prepare('SELECT id, parent_id, time_created, time_updated, data FROM session WHERE time_updated > ?1 ORDER BY time_updated ASC')
+      .prepare(`SELECT ${sessionCols} FROM session WHERE time_updated > ?1 ORDER BY time_updated ASC`)
       .all(timeCursor) as SessionRow[],
     sessionById: (id) => db
-      .prepare('SELECT id, parent_id, time_created, time_updated, data FROM session WHERE id = ?1')
+      .prepare(`SELECT ${sessionCols} FROM session WHERE id = ?1`)
       .get(id) as SessionRow | undefined,
     parentById: (id) => {
       const row = db.prepare('SELECT parent_id FROM session WHERE id = ?1').get(id) as Pick<SessionRow, 'parent_id'> | undefined;

@@ -1,6 +1,6 @@
 {
   "name": "orbservatory",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Visualise Claude Code, Codex, opencode, and GitHub Copilot sessions as a live animated agent graph",
   "license": "MIT",
   "author": "Brendan Shields <hello@brendanshields.dev>",
