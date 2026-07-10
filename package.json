@@ -1,26 +1,73 @@
 {
-  "name": "claude-viz",
+  "name": "orbservatory",
   "version": "0.1.0",
+  "description": "Visualise Claude Code, Codex, opencode, and GitHub Copilot sessions as a live animated agent graph",
+  "license": "MIT",
+  "author": "Brendan Shields <hello@brendanshields.dev>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BrendanShields/orbservatory.git"
+  },
+  "keywords": [
+    "claude-code",
+    "codex",
+    "opencode",
+    "copilot",
+    "visualization",
+    "agents",
+    "transcript"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "type": "module",
   "bin": {
     "claude-viz": "./scripts/cli.ts"
   },
   "files": [
+    "app",
     "server",
     "web",
     "shared",
-    "scripts"
+    "scripts",
+    "public",
+    "next.config.ts",
+    ".next",
+    "!.next/dev",
+    "!.next/cache"
   ],
   "scripts": {
-    "start": "bun run scripts/cli.ts",
-    "serve": "bun run server/index.ts",
-    "dev": "NODE_ENV=development bun --watch server/index.ts",
-    "build:bin": "bun run scripts/compile.ts",
+    "dev": "tsx scripts/next-server.ts --dev",
+    "build": "next build",
+    "start": "NODE_ENV=production tsx scripts/next-server.ts",
+    "serve": "NODE_ENV=production tsx scripts/next-server.ts --no-open",
+    "next:dev": "next dev",
+    "next:start": "next start",
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint",
+    "prepublishOnly": "next build"
+  },
+  "dependencies": {
+    "next": "16.2.10",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "ws": "^8.18.3",
+    "tsx": "^4.21.0"
   },
   "devDependencies": {
     "@types/bun": "^1.2.0",
-    "typescript": "^6.0.3"
+    "@types/node": "^26.1.1",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/ws": "^8.18.1",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.10",
+    "typescript": "^5"
+  },
+  "pnpm": {
+    "overrides": {
+      "postcss": ">=8.5.10"
+    }
   }
 }
