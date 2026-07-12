@@ -96,6 +96,8 @@ export class VisualRenderer {
   hoverId: string | null = null;
   selectedId: string | null = null;
   railOpen = true;
+  /** Live inspector element — measured for the camera gutter (the pane widens when the transcript tab is open). */
+  inspectorEl?: HTMLElement;
   layout: LayoutMode = 'organic';
   palette: PaletteName = 'Deep Teal';
   resolvedTheme: CanvasMode = 'dark';
@@ -463,6 +465,13 @@ export class VisualRenderer {
     }
   }
 
+  /** Measured inspector width + its right offset/margin; falls back to the historical 374 (344px pane + 30). */
+  private inspectorGutter(): number {
+    const el = this.inspectorEl;
+    const w = el && !el.hidden ? el.offsetWidth : 0;
+    return w > 0 ? w + 30 : 374;
+  }
+
   private updateCam() {
     const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
     if (this.focusId) {
@@ -474,7 +483,7 @@ export class VisualRenderer {
     if (this.userCam || !this.nodes.size) return;
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
     for (const n of this.nodes.values()) { x0 = Math.min(x0, n.x - 75); y0 = Math.min(y0, n.y - 65); x1 = Math.max(x1, n.x + 75); y1 = Math.max(y1, n.y + 65); }
-    const px0 = this.railOpen ? 282 : 22, px1 = w - (this.selectedId ? 374 : 22);
+    const px0 = this.railOpen ? 282 : 22, px1 = w - (this.selectedId ? this.inspectorGutter() : 22);
     const vw = Math.max(140, px1 - px0), vh = h - 80;
     const ts = Math.min(1.35, Math.max(0.14, Math.min(vw / Math.max(1, x1 - x0), vh / Math.max(1, y1 - y0))));
     const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;

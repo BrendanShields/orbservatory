@@ -269,7 +269,7 @@ export class PiNormalizer implements SessionNormalizer {
   }
 }
 
-function totalTokens(usage: any): number | null {
+export function totalTokens(usage: any): number | null {
   if (!usage || typeof usage !== 'object') return null;
   const total = Number(usage.totalTokens);
   if (Number.isFinite(total) && total > 0) return total;
@@ -282,13 +282,13 @@ function totalTokens(usage: any): number | null {
   return seen ? sum : null;
 }
 
-function blocksOf(content: any): any[] {
+export function blocksOf(content: any): any[] {
   if (Array.isArray(content)) return content;
   if (content == null) return [];
   return [{ type: 'text', text: String(content) }];
 }
 
-function textOf(content: any): string {
+export function textOf(content: any): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
     return content
@@ -299,7 +299,7 @@ function textOf(content: any): string {
   return '';
 }
 
-function summarizeArgs(args: any): string {
+export function summarizeArgs(args: any): string {
   if (args == null || typeof args !== 'object') return truncate(String(args ?? ''), 90);
   const preferred = ['command', 'path', 'file_path', 'pattern', 'query', 'url'];
   for (const key of preferred) {
@@ -316,7 +316,7 @@ function firstLine(v: string): string {
   return v.trim().split('\n')[0] || '';
 }
 
-function strOf(v: any): string {
+export function strOf(v: any): string {
   return typeof v === 'string' ? v : '';
 }
 

@@ -162,6 +162,33 @@ export interface SessionSummary {
   agentCount: number;
 }
 
+export interface TranscriptItem {
+  /** Stable index within the session — the paging cursor basis. */
+  i: number;
+  /** Milliseconds relative to session start — same clock as AwvEvent.t. */
+  t: number;
+  /** ISO wall clock when known. */
+  ts?: string;
+  role: 'user' | 'assistant' | 'tool' | 'tool-result' | 'error';
+  /** AWV agent id (session:<id> / …:agent-<id>). */
+  agent: string;
+  /** Capped at 4000 chars. */
+  text: string;
+  truncated?: boolean;
+  /** Tool name for tool/tool-result rows. */
+  tool?: string;
+  /** Usage delta when the record carries one. */
+  tokens?: number;
+}
+
+export interface TranscriptResponse {
+  items: TranscriptItem[];
+  /** Oldest `i` in the returned window when older items remain (fetch with before=). */
+  nextCursor?: number;
+  /** Total item count, present on the initial (no before/after) page. */
+  total?: number;
+}
+
 export type ClientMessage =
   | { type: 'subscribe'; sessionIds: string[] | 'all-live'; lastEventIndex?: Record<string, number>; bootId?: string }
   | { type: 'ping' };

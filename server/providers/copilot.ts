@@ -1,11 +1,13 @@
-import { readdir, stat } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import type { TranscriptItem, TranscriptResponse } from '../../shared/schema';
 import type { SessionStore, SessionState } from '../store';
 import type { SessionProvider } from './types';
-import { CopilotNormalizer } from './copilot-normalizer';
+import { CopilotNormalizer, messageRole, messageText, summarize } from './copilot-normalizer';
 import { tailLines } from './tail';
 import { readFileSlice } from '../fileSlice';
+import { capText, extractClock, pageItems, type TranscriptQuery } from '../transcript';
 
 interface CopilotOptions {
   root?: string;
@@ -74,6 +76,21 @@ export class CopilotProvider implements SessionProvider {
   async ensureLoaded(state: SessionState) {
     if (state.loaded) return;
     await this.processSession(state);
+  }
+
+  async transcript(state: SessionState, q: TranscriptQuery): Promise<TranscriptResponse | null> {
+    const text = await readFile(state.rootFile, 'utf8');
+    const items: TranscriptItem[] = [];
+    const clock = extractClock();
+    const toolNames = new Map<string, string>();
+    const agentId = `session:${state.sessionId}`;
+    for (const line of text.split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      const rec = safeJson(line);
+      if (rec && typeof rec === 'object') copilotLineItems(rec, agentId, clock, toolNames, items);
+    }
+    items.forEach((it, idx) => { it.i = idx; });
+    return pageItems(items, q);
   }
 
   async scan() {
@@ -165,4 +182,46 @@ export class CopilotProvider implements SessionProvider {
       // Unreadable file: leave defaults; a later subscribe will surface real errors.
     }
   }
+}
+
+function copilotLineItems(rec: any, agentId: string, clock: ReturnType<typeof extractClock>, toolNames: Map<string, string>, out: TranscriptItem[]) {
+  const type = String(rec.type || '');
+  const data = rec.data ?? {};
+  const n = Date.parse(rec.timestamp || '');
+  const { ts, t } = clock.at(Number.isFinite(n) ? n : null);
+  const iso = new Date(ts).toISOString();
+  const push = (role: TranscriptItem['role'], text: string, tool?: string) => {
+    const c = capText(text);
+    const item: TranscriptItem = { i: 0, t, ts: iso, role, agent: agentId, text: c.text };
+    if (c.truncated) item.truncated = true;
+    if (tool) item.tool = tool;
+    out.push(item);
+  };
+
+  if (type === 'tool.execution_start') {
+    const tool = String(data.toolName ?? data.tool ?? data.name ?? 'tool');
+    const useId = strOrUndef(data.toolCallId ?? data.callId ?? data.id);
+    if (useId) toolNames.set(useId, tool);
+    push('tool', summarize(data.arguments ?? data.input), tool);
+    return;
+  }
+  if (type === 'tool.execution_complete') {
+    if (data.success === false) {
+      const useId = strOrUndef(data.toolCallId ?? data.callId ?? data.id);
+      const tool = useId ? toolNames.get(useId) : undefined;
+      push('error', String(data.error ?? data.message ?? `${tool || 'tool'} failed`), tool);
+    }
+    return;
+  }
+  const text = messageText(rec);
+  if (!text) return;
+  push(messageRole(rec) === 'assistant' ? 'assistant' : 'user', text);
+}
+
+function strOrUndef(v: any): string | undefined {
+  return typeof v === 'string' && v ? v : undefined;
+}
+
+function safeJson(raw: string): any | null {
+  try { return JSON.parse(raw); } catch { return null; }
 }

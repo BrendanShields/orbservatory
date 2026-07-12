@@ -1,4 +1,4 @@
-import type { SearchResponse, ServerMessage } from '../shared/schema';
+import type { SearchResponse, ServerMessage, TranscriptResponse } from '../shared/schema';
 
 interface TransportCallbacks {
   onOpen(): void;
@@ -46,4 +46,30 @@ export async function searchServer(q: string): Promise<SearchResponse | null> {
 
 export function putSettings(patch: Record<string, unknown>) {
   fetch('/api/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch) }).catch(() => {});
+}
+
+export interface TranscriptFetchQuery { agent?: string; before?: number; after?: number; limit?: number }
+export type TranscriptFetchResult = TranscriptResponse | { unsupported: true } | { gone: true } | null;
+
+/** Session ids contain slashes (path separators for the catch-all route); encode each segment only. */
+export async function fetchTranscript(sessionId: string, q: TranscriptFetchQuery): Promise<TranscriptFetchResult> {
+  const sp = new URLSearchParams();
+  if (q.agent) sp.set('agent', q.agent);
+  if (q.before != null) sp.set('before', String(q.before));
+  if (q.after != null) sp.set('after', String(q.after));
+  if (q.limit != null) sp.set('limit', String(q.limit));
+  const path = sessionId.split('/').map(encodeURIComponent).join('/');
+  const qs = sp.size ? `?${sp}` : '';
+  try {
+    const r = await fetch(`/api/session/${path}/transcript${qs}`);
+    if (r.status === 410) return { gone: true };
+    if (r.status === 404) {
+      const body = await r.json().catch(() => null);
+      return body?.unsupported ? { unsupported: true } : null;
+    }
+    if (!r.ok) return null;
+    return await r.json() as TranscriptResponse;
+  } catch {
+    return null;
+  }
 }

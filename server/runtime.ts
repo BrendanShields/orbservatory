@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import type { ClientMessage, SearchRequest, SearchResponse, ServerMessage, SessionSource, Settings } from '../shared/schema';
+import type { ClientMessage, SearchRequest, SearchResponse, ServerMessage, SessionSource, Settings, TranscriptResponse } from '../shared/schema';
 import { SessionStore, type SessionState, type Subscriber } from './store';
 import { ClaudeProjectWatcher } from './providers/claude';
 import { CodexProvider, defaultCodexRoot } from './providers/codex';
@@ -7,6 +7,7 @@ import { OpencodeProvider, defaultOpencodeDataDir, findOpencodeDb } from './prov
 import { CopilotProvider, defaultCopilotRoot } from './providers/copilot';
 import { PiProvider, defaultPiRoot } from './providers/pi';
 import type { SessionProvider } from './providers/types';
+import type { TranscriptQuery } from './transcript';
 import { StatsCache } from './statsCache';
 import { searchDocs } from './searchIndex';
 import { SettingsStore } from './settings';
@@ -128,6 +129,17 @@ export class VisualiserRuntime {
     if (!state) return null;
     await this.ensureLoaded(state);
     return this.store.snapshot(state);
+  }
+
+  /** Extractors read disk directly — no ensureLoaded. Throws (ENOENT) when the source vanished. */
+  async transcript(id: string, q: TranscriptQuery): Promise<TranscriptResponse | { unsupported: true } | null> {
+    await this.ready;
+    const state = this.store.get(id);
+    if (!state) return null;
+    const provider = this.providers.get(state.source);
+    if (!provider?.transcript) return { unsupported: true };
+    const res = await provider.transcript(state, q);
+    return res ?? { unsupported: true };
   }
 
   addWebSocket(ws: WebSocketLike): WsSubscriber {

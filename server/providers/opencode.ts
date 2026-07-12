@@ -1,11 +1,12 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
-import type { AwvAgent, AwvEvent } from '../../shared/schema';
+import type { AwvAgent, AwvEvent, TranscriptItem, TranscriptResponse } from '../../shared/schema';
 import type { SessionStore, SessionState } from '../store';
 import type { SessionProvider } from './types';
-import { OpencodeNormalizer } from './opencode-normalizer';
+import { OpencodeNormalizer, errorLabel, summarizeInput } from './opencode-normalizer';
 import { openOpencodeDb, type OpencodeDb } from './opencode-db';
+import { capText, pageItems, type TranscriptQuery } from '../transcript';
 
 interface OpencodeOptions {
   dataDir?: string;
@@ -96,6 +97,62 @@ export class OpencodeProvider implements SessionProvider {
   async ensureLoaded(state: SessionState) {
     if (state.loaded || this.disabled || !this.open()) return;
     await this.processSession(state, true);
+  }
+
+  async transcript(state: SessionState, q: TranscriptQuery): Promise<TranscriptResponse | null> {
+    const db = this.open();
+    if (!db) return null;
+    const rootRow = db.sessionById(state.sessionId);
+    if (!rootRow) return null;
+    const rootData = rowData(rootRow);
+    const startedAt = Number(rootData?.time?.created) || rootRow.time_created || 0;
+    const items: TranscriptItem[] = [];
+    const rootId = `session:${state.sessionId}`;
+    for (const sessId of this.sessionTree(state.sessionId, db)) {
+      const agentId = sessId === state.sessionId ? rootId : `${rootId}:agent-${sessId}`;
+      const batch: TranscriptItem[] = [];
+      const push = (role: TranscriptItem['role'], text: string, ts: number, tool?: string) => {
+        const c = capText(text);
+        const item: TranscriptItem = { i: 0, t: ts > 0 && startedAt ? Math.max(0, ts - startedAt) : 0, role, agent: agentId, text: c.text };
+        if (ts > 0) item.ts = new Date(ts).toISOString();
+        if (c.truncated) item.truncated = true;
+        if (tool) item.tool = tool;
+        batch.push(item);
+      };
+      const roleByMsg = new Map<string, string>();
+      for (const m of db.messagesForSession(sessId)) {
+        const data = rowData(m);
+        roleByMsg.set(String(data?.id || m.id), String(data?.role || ''));
+        if (data?.role === 'assistant' && data?.error != null) {
+          push('error', errorLabel(data.error), Number(data?.time?.completed) || Number(data?.time?.created) || 0);
+        }
+      }
+      for (const p of db.partsForSession(sessId)) {
+        const data = rowData(p);
+        const type = String(data?.type || '');
+        if (type === 'text') {
+          const text = String(data?.text ?? '');
+          if (!text.trim()) continue;
+          const role = roleByMsg.get(String(data?.messageID || '')) === 'assistant' ? 'assistant' : 'user';
+          push(role, text, Number(data?.time?.start) || 0);
+        } else if (type === 'tool') {
+          const st = data?.state ?? {};
+          const started = Number(st.time?.start) || 0;
+          if (!started) continue;
+          const tool = String(data?.tool || 'tool');
+          push('tool', String(st.title || summarizeInput(st.input)), started, tool);
+          if (String(st.status || '') === 'error') {
+            push('error', String(st.error ?? `${tool} failed`), Number(st.time?.end) || started, tool);
+          }
+        }
+      }
+      // Message-level errors and parts are separate row streams; a stable
+      // per-session sort by t restores reading order without disturbing ties.
+      batch.sort((a, b) => a.t - b.t);
+      items.push(...batch);
+    }
+    items.forEach((it, idx) => { it.i = idx; });
+    return pageItems(items, q);
   }
 
   async scan() {

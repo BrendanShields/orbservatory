@@ -241,7 +241,7 @@ function totalTokens(payload: any): number | null {
   return seen ? sum : null;
 }
 
-function outputFailure(output: any): { failed: boolean; exitCode?: number; label?: string } {
+export function outputFailure(output: any): { failed: boolean; exitCode?: number; label?: string } {
   let obj = output;
   if (typeof output === 'string') {
     obj = safeJson(output);
@@ -267,12 +267,27 @@ function outputFailure(output: any): { failed: boolean; exitCode?: number; label
   return { failed: false };
 }
 
+/** Raw display text of a tool output payload: JSON envelopes unwrap to their output/content field. */
+export function outputText(output: any): string {
+  if (typeof output === 'string') {
+    const obj = safeJson(output);
+    if (obj && typeof obj === 'object') return outputText(obj);
+    return output;
+  }
+  if (output && typeof output === 'object') {
+    const v = output.output ?? output.content ?? output.error;
+    if (typeof v === 'string') return v;
+    return JSON.stringify(output);
+  }
+  return output == null ? '' : String(output);
+}
+
 function firstLine(v: any): string | undefined {
   if (typeof v !== 'string' || !v.trim()) return undefined;
   return v.trim().split('\n')[0];
 }
 
-function summarizeArgs(args: any): string {
+export function summarizeArgs(args: any): string {
   if (args == null) return '';
   if (typeof args === 'string') {
     const parsed = safeJson(args);
