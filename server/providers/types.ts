@@ -1,4 +1,4 @@
-import type { AwvAgent, AwvEvent, AwvSession, SearchPart, SessionSource, TokenTotals, TranscriptResponse } from '../../shared/schema';
+import type { AwvAgent, AwvEvent, AwvSession, AwvTask, SearchPart, SessionSource, TokenTotals, TranscriptResponse } from '../../shared/schema';
 import type { SessionState } from '../store';
 import type { TranscriptQuery } from '../transcript';
 
@@ -21,6 +21,8 @@ export interface SessionNormalizer {
   parseFailures?: number;
   searchParts?: SearchPart[];
   getAgents?(): AwvAgent[];
+  /** Live task list (Claude TodoWrite/TaskCreate/TaskUpdate); providers without one omit it. */
+  tasks?: AwvTask[];
 }
 
 export interface SessionProvider {
