@@ -1,4 +1,4 @@
-import type { AwvAgent, AwvEvent, AwvSession, SearchPart, TokenTotals } from '../shared/schema';
+import type { AwvAgent, AwvEvent, AwvSession, AwvTask, AwvTaskStatus, SearchPart, TokenTotals } from '../shared/schema';
 import { hashStr } from '../shared/order';
 
 const SEARCH_PART_MAX = 2000;
@@ -38,6 +38,7 @@ export interface NormalizedBatch {
   agents: AwvAgent[];
   events: AwvEvent[];
   titleChanged?: boolean;
+  tasksChanged?: boolean;
 }
 
 const HOUSEKEEPING_TYPES = new Set(['attachment', 'file-history-snapshot', 'last-prompt', 'mode', 'permission-mode', 'queue-operation', 'system', 'progress', 'cost']);
@@ -73,6 +74,10 @@ export class TranscriptNormalizer {
   readonly searchParts: SearchPart[] = [];
   private searchChars = 0;
   private countedUsageIds = new Set<string>();
+  /** Session task list: TodoWrite snapshots replace it; TaskCreate/TaskUpdate mutate it. */
+  readonly tasks: AwvTask[] = [];
+  private tasksDirty = false;
+  private taskCreateUses = new Map<string, AwvTask>();
 
   get lastActiveTs(): number {
     return this.lastTs;
@@ -135,6 +140,7 @@ export class TranscriptNormalizer {
       agents: [...this.agents.values()],
       // Events arrive pre-sorted from the store; keep them as-is so indexes stay stable.
       events: events.slice(),
+      tasks: this.tasks.length ? this.tasks.map((t) => ({ ...t })) : undefined,
     };
   }
 
@@ -181,6 +187,48 @@ export class TranscriptNormalizer {
     if (!text) return;
     this.searchChars += text.length;
     this.searchParts.push({ f, s: text });
+  }
+
+  private ingestTaskTool(tool: string, input: any, useId: string | undefined) {
+    if (!input || typeof input !== 'object') return;
+    if (tool === 'TodoWrite' && Array.isArray(input.todos)) {
+      const next: AwvTask[] = [];
+      for (const todo of input.todos) {
+        if (!todo || typeof todo !== 'object') continue;
+        const subject = truncate(String(todo.content ?? todo.subject ?? ''), 120);
+        if (!subject) continue;
+        next.push({ subject, status: taskStatus(todo.status) });
+      }
+      this.tasks.splice(0, this.tasks.length, ...next);
+      this.tasksDirty = true;
+    } else if (tool === 'TaskCreate' && input.subject) {
+      const task: AwvTask = { subject: truncate(String(input.subject), 120), status: 'pending' };
+      this.tasks.push(task);
+      if (useId) this.taskCreateUses.set(useId, task);
+      this.tasksDirty = true;
+    } else if (tool === 'TaskUpdate' && input.taskId != null) {
+      const id = String(input.taskId);
+      const i = this.tasks.findIndex((t) => t.id === id);
+      if (i < 0) return;
+      if (input.status === 'deleted') this.tasks.splice(i, 1);
+      else {
+        if (input.status) this.tasks[i].status = taskStatus(input.status);
+        if (input.subject) this.tasks[i].subject = truncate(String(input.subject), 120);
+      }
+      this.tasksDirty = true;
+    }
+  }
+
+  /** TaskCreate ids only exist in the tool result ("Task #7 created…"); backfill from it. */
+  private resolveTaskId(toolUseId: string, resultText: string) {
+    const pending = this.taskCreateUses.get(toolUseId);
+    if (!pending) return;
+    this.taskCreateUses.delete(toolUseId);
+    const m = /Task #(\d+)/.exec(resultText);
+    if (m && !pending.id) {
+      pending.id = m[1];
+      this.tasksDirty = true;
+    }
   }
 
   normalizeLine(raw: unknown, source: TranscriptSource): NormalizedBatch {
@@ -243,6 +291,7 @@ export class TranscriptNormalizer {
           const label = truncate(textFromContent(block.content) || (failed ? 'tool error' : 'result'), 96);
           const toolEv = toolUseId ? this.toolByUseId.get(toolUseId) : undefined;
           if (toolEv) applyToolOutcome(toolEv, tur, failed);
+          if (toolUseId && toolEv?.tool === 'TaskCreate' && !failed) this.resolveTaskId(toolUseId, textFromContent(block.content));
           const agentEnrich = enrichmentFromAgentResult(tur);
           if (agentEnrich) {
             if (child) this.enrichAgent(child, agentEnrich);
@@ -307,6 +356,7 @@ export class TranscriptNormalizer {
           this.skills[skill] = (this.skills[skill] || 0) + 1;
           this.addSearchPart('skill', skill);
         }
+        this.ingestTaskTool(tool, block.input, useId);
         const ev: Extract<AwvEvent, { type: 'tool' }> = { t: t + toolEvents.length * 30, type: 'tool', agent: agentId, tool, label, useId };
         toolEvents.push(ev);
         if (useId) {
@@ -569,7 +619,9 @@ export class TranscriptNormalizer {
       }
       this.dirty.clear();
     }
-    return { agents, events, titleChanged };
+    const tasksChanged = this.tasksDirty || undefined;
+    this.tasksDirty = false;
+    return { agents, events, titleChanged, tasksChanged };
   }
 
   private ensureRootPlaceholder(source: TranscriptSource, t: number, ts: string): AwvAgent {
@@ -712,6 +764,10 @@ function summarizeInput(input: any, tool?: string, cwd?: string): string {
 function bareIdOf(x: any): string {
   if (x == null) return '';
   return String(x).replace(/^agent-/, '');
+}
+
+function taskStatus(v: any): AwvTaskStatus {
+  return v === 'in_progress' || v === 'completed' ? v : 'pending';
 }
 
 function failedResult(tur: any): boolean {

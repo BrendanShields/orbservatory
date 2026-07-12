@@ -364,14 +364,16 @@ export class ClaudeProjectWatcher implements SessionProvider {
     const normalizer = this.normalizerOf(state);
     const agents = [] as any[];
     const events = [] as any[];
+    let tasksChanged = false;
     const journal = file.source.kind === 'workflow-journal';
     const { reset } = await tailLines(state.files, file.path, (line) => {
       const batch = journal ? normalizer.ingestJournal(line, file.source) : normalizer.normalizeLine(line, file.source);
       agents.push(...batch.agents);
       events.push(...batch.events);
+      if (batch.tasksChanged) tasksChanged = true;
     });
     if (reset) return true;
-    this.store.merge(state, agents, events);
+    this.store.merge(state, agents, events, tasksChanged);
     return false;
   }
 }

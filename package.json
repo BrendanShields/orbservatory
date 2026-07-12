@@ -51,6 +51,8 @@
     "next:dev": "next dev",
     "next:start": "next start",
     "test": "bun test",
+    "stats": "tsx tui/orb-stats.ts",
+    "tasks": "tsx tui/orb-tasks.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint",
     "prepack": "next build && node scripts/scrub-build.mjs"

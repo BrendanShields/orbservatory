@@ -1,4 +1,4 @@
-import type { AwvAgent, AwvEvent, AwvSession, SearchPart, SessionSource, TokenTotals } from '../../shared/schema';
+import type { AwvAgent, AwvEvent, AwvSession, AwvTask, SearchPart, SessionSource, TokenTotals } from '../../shared/schema';
 import type { SessionState } from '../store';
 
 /** Minimal normalizer surface the store depends on; each provider supplies its own implementation. */
@@ -20,6 +20,8 @@ export interface SessionNormalizer {
   parseFailures?: number;
   searchParts?: SearchPart[];
   getAgents?(): AwvAgent[];
+  /** Live task list (Claude TodoWrite/TaskCreate/TaskUpdate); providers without one omit it. */
+  tasks?: AwvTask[];
 }
 
 export interface SessionProvider {

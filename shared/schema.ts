@@ -40,11 +40,21 @@ export type AwvEvent =
   | { t: number; ts?: string; type: 'retry'; agent: string; label?: string }
   | { t: number; ts?: string; type: 'complete'; agent: string; label?: string };
 
+export type AwvTaskStatus = 'pending' | 'in_progress' | 'completed';
+
+export interface AwvTask {
+  /** Harness task id when known (TaskCreate result); TodoWrite items have none. */
+  id?: string;
+  subject: string;
+  status: AwvTaskStatus;
+}
+
 export interface AwvSession {
   name: string;
   desc?: string;
   agents: AwvAgent[];
   events: AwvEvent[];
+  tasks?: AwvTask[];
 }
 
 export interface ModelPricing {
@@ -169,7 +179,7 @@ export type ClientMessage =
 export type ServerMessage =
   | { type: 'sessions'; sessions: SessionSummary[]; bootId?: string }
   | { type: 'snapshot'; sessionId: string; session: AwvSession; eventOffset: number; done?: boolean }
-  | { type: 'events'; sessionId: string; events: AwvEvent[]; from: number; agents?: AwvAgent[] }
+  | { type: 'events'; sessionId: string; events: AwvEvent[]; from: number; agents?: AwvAgent[]; tasks?: AwvTask[] }
   | { type: 'stats'; stats: SessionStats[] }
   | { type: 'settings'; settings: Settings }
   | { type: 'pong' }

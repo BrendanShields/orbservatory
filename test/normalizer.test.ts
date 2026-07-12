@@ -178,3 +178,51 @@ test('journal ingested before any timestamped line does not poison startedAt', (
   const m2 = b.events.find(e => e.type === 'message') as any;
   expect(m2.t - m1.t).toBe(60000);
 });
+
+test('TodoWrite snapshots replace the task list and flag tasksChanged', () => {
+  const n = new TranscriptNormalizer({ sessionId: 's1', project: 'demo' });
+  n.normalizeLine({ type: 'user', timestamp: '2026-07-06T00:00:00.000Z', message: { content: 'go' } }, rootSource);
+  const a = n.normalizeLine({ type: 'assistant', timestamp: '2026-07-06T00:00:01.000Z', message: { usage: { input_tokens: 10 }, content: [
+    { type: 'tool_use', id: 'td1', name: 'TodoWrite', input: { todos: [
+      { content: 'write tests', status: 'in_progress', activeForm: 'Writing tests' },
+      { content: 'ship it', status: 'pending' },
+    ] } },
+  ] } }, rootSource);
+  expect(a.tasksChanged).toBe(true);
+  expect(n.tasks).toEqual([
+    { subject: 'write tests', status: 'in_progress' },
+    { subject: 'ship it', status: 'pending' },
+  ]);
+  const b = n.normalizeLine({ type: 'assistant', timestamp: '2026-07-06T00:00:02.000Z', message: { usage: { input_tokens: 20 }, content: [
+    { type: 'tool_use', id: 'td2', name: 'TodoWrite', input: { todos: [{ content: 'ship it', status: 'completed' }] } },
+  ] } }, rootSource);
+  expect(b.tasksChanged).toBe(true);
+  expect(n.tasks).toEqual([{ subject: 'ship it', status: 'completed' }]);
+  expect(n.snapshot([]).tasks).toEqual([{ subject: 'ship it', status: 'completed' }]);
+});
+
+test('TaskCreate backfills id from result; TaskUpdate mutates and deletes by id', () => {
+  const n = new TranscriptNormalizer({ sessionId: 's1', project: 'demo' });
+  n.normalizeLine({ type: 'user', timestamp: '2026-07-06T00:00:00.000Z', message: { content: 'go' } }, rootSource);
+  n.normalizeLine({ type: 'assistant', timestamp: '2026-07-06T00:00:01.000Z', message: { usage: { input_tokens: 10 }, content: [
+    { type: 'tool_use', id: 'tc1', name: 'TaskCreate', input: { subject: 'Fix auth bug', description: 'x' } },
+  ] } }, rootSource);
+  expect(n.tasks).toEqual([{ subject: 'Fix auth bug', status: 'pending' }]);
+  const res = n.normalizeLine({ type: 'user', timestamp: '2026-07-06T00:00:02.000Z', message: { content: [
+    { type: 'tool_result', tool_use_id: 'tc1', content: 'Task #7 created successfully: Fix auth bug' },
+  ] } }, rootSource);
+  expect(res.tasksChanged).toBe(true);
+  expect(n.tasks).toEqual([{ id: '7', subject: 'Fix auth bug', status: 'pending' }]);
+  n.normalizeLine({ type: 'assistant', timestamp: '2026-07-06T00:00:03.000Z', message: { usage: { input_tokens: 30 }, content: [
+    { type: 'tool_use', id: 'tu1', name: 'TaskUpdate', input: { taskId: '7', status: 'in_progress' } },
+  ] } }, rootSource);
+  expect(n.tasks[0].status).toBe('in_progress');
+  n.normalizeLine({ type: 'assistant', timestamp: '2026-07-06T00:00:04.000Z', message: { usage: { input_tokens: 40 }, content: [
+    { type: 'tool_use', id: 'tu2', name: 'TaskUpdate', input: { taskId: '7', status: 'deleted' } },
+  ] } }, rootSource);
+  expect(n.tasks).toEqual([]);
+  const c = n.normalizeLine({ type: 'assistant', timestamp: '2026-07-06T00:00:05.000Z', message: { usage: { input_tokens: 50 }, content: [
+    { type: 'tool_use', id: 'tu3', name: 'TaskUpdate', input: { taskId: '99', status: 'completed' } },
+  ] } }, rootSource);
+  expect(c.tasksChanged).toBeUndefined();
+});

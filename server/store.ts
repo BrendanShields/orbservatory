@@ -145,7 +145,7 @@ export class SessionStore {
     }));
   }
 
-  merge(state: SessionState, agents: AwvAgent[], events: AwvEvent[]) {
+  merge(state: SessionState, agents: AwvAgent[], events: AwvEvent[], tasksChanged = false) {
     let changed = false;
     for (const agent of agents) {
       state.agents.set(agent.id, agent);
@@ -167,11 +167,12 @@ export class SessionStore {
       changed = true;
     }
     if (changed) state.statsDirty = true;
-    if (!state.loading && (events.length || agents.length)) {
+    if (!state.loading && (events.length || agents.length || tasksChanged)) {
       const from = Math.max(0, state.events.length - events.length);
       const upserts = agents.length ? agents : undefined;
+      const tasks = tasksChanged ? (state.normalizer.tasks ?? []).map((t) => ({ ...t })) : undefined;
       for (const sub of this.subscribers) {
-        if (sub.wants(state)) sub.send({ type: 'events', sessionId: state.id, events, from, agents: upserts });
+        if (sub.wants(state)) sub.send({ type: 'events', sessionId: state.id, events, from, agents: upserts, tasks });
       }
     }
     if (changed && !state.loading) this.broadcastSessions();
