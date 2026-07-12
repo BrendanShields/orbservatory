@@ -13,6 +13,7 @@ export interface HomeCallbacks {
   onImport(): void;
   onSettings(): void;
   onCycleTheme(): void;
+  onOpenInsights(): void;
   /** Server full-text search; resolve null on failure (treated as "no extra ids"). */
   search(q: string): Promise<SearchResponse | null>;
 }
@@ -71,6 +72,7 @@ export class HomeView {
           <div class="home-stats">
             <span id="homeStatline" class="statline"></span>
             <button id="homeInsights" class="ghost insights-toggle" aria-expanded="false">Insights <i class="ins-chev">▾</i></button>
+            <button id="homeTrends" class="ghost insights-toggle" title="Usage trends over time">Trends →</button>
             <div id="homeLiveStrip" class="live-strip" role="list" aria-label="Live sessions" hidden></div>
           </div>
           <div id="homeAgg" class="home-agg-wrap"><div id="homeAggInner" class="home-agg" aria-label="Aggregate stats for the filtered set"></div></div>
@@ -124,6 +126,7 @@ export class HomeView {
       }
       this.render();
     };
+    (root.querySelector('#homeTrends') as HTMLButtonElement).onclick = () => cb.onOpenInsights();
     (root.querySelector('#homeImportBtn') as HTMLButtonElement).onclick = () => cb.onImport();
     (root.querySelector('#homeTheme') as HTMLButtonElement).onclick = () => cb.onCycleTheme();
     (root.querySelector('#homeSettings') as HTMLButtonElement).onclick = () => cb.onSettings();
