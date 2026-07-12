@@ -8,6 +8,8 @@ export interface OpencodeDb {
   childIds(parentId: string): string[];
   messagesAfter(sessionId: string, cursor: string): Array<{ id: string; data: string }>;
   partsAfter(sessionId: string, cursor: string): Array<{ id: string; data: string }>;
+  messagesForSession(sessionId: string): Array<{ id: string; data: string }>;
+  partsForSession(sessionId: string): Array<{ id: string; data: string }>;
 }
 
 export interface SessionRow {
@@ -67,5 +69,11 @@ export function openOpencodeDb(path: string): OpencodeDb {
     partsAfter: (sessionId, cursor) => db
       .prepare('SELECT id, data FROM part WHERE session_id = ?1 AND id > ?2 ORDER BY id ASC')
       .all(sessionId, cursor) as Array<{ id: string; data: string }>,
+    messagesForSession: (sessionId) => db
+      .prepare('SELECT id, data FROM message WHERE session_id = ?1 ORDER BY id ASC')
+      .all(sessionId) as Array<{ id: string; data: string }>,
+    partsForSession: (sessionId) => db
+      .prepare('SELECT id, data FROM part WHERE session_id = ?1 ORDER BY id ASC')
+      .all(sessionId) as Array<{ id: string; data: string }>,
   };
 }

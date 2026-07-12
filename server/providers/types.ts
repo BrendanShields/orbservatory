@@ -1,5 +1,6 @@
-import type { AwvAgent, AwvEvent, AwvSession, SearchPart, SessionSource, TokenTotals } from '../../shared/schema';
+import type { AwvAgent, AwvEvent, AwvSession, SearchPart, SessionSource, TokenTotals, TranscriptResponse } from '../../shared/schema';
 import type { SessionState } from '../store';
+import type { TranscriptQuery } from '../transcript';
 
 /** Minimal normalizer surface the store depends on; each provider supplies its own implementation. */
 export interface SessionNormalizer {
@@ -32,4 +33,6 @@ export interface SessionProvider {
   setLivenessMs(ms: number): void;
   /** Fully parse a session on demand (subscriber asked for a historical session). */
   ensureLoaded(state: SessionState): Promise<void>;
+  /** Read-only transcript page straight from disk; never touches tail cursors or live normalizer state. */
+  transcript?(state: SessionState, q: TranscriptQuery): Promise<TranscriptResponse | null>;
 }

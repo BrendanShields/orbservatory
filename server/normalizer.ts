@@ -41,6 +41,10 @@ export interface NormalizedBatch {
 }
 
 const HOUSEKEEPING_TYPES = new Set(['attachment', 'file-history-snapshot', 'last-prompt', 'mode', 'permission-mode', 'queue-operation', 'system', 'progress', 'cost']);
+
+export function isHousekeepingType(type: string): boolean {
+  return HOUSEKEEPING_TYPES.has(type);
+}
 // Most current Claude models have a 1M-token context window; Haiku 4.5 and the Claude 3.x
 // generation are 200k. Unknown models get the 1M default.
 export const DEFAULT_CONTEXT_LIMIT = 1_000_000;
@@ -52,6 +56,10 @@ export function contextLimitFor(model: string | undefined): number {
 }
 const COLORS = ['cyan', 'gold', 'purple', 'pink', 'green', 'slate'];
 const META_CONTENT = /<command-name>|<command-message>|<local-command-caveat>|<local-command-stdout>|<system-reminder>/;
+
+export function isMetaText(text: string): boolean {
+  return META_CONTENT.test(text);
+}
 
 export class TranscriptNormalizer {
   readonly sessionId: string;
@@ -155,7 +163,7 @@ export class TranscriptNormalizer {
       const blocks = contentBlocks(rec.message?.content ?? rec.content);
       if (!blocks.some((b) => b && typeof b === 'object' && b.type === 'tool_result')) {
         const text = textFromContent(rec.message?.content ?? rec.content);
-        if (text && !META_CONTENT.test(text)) this.setTitle(text, 1);
+        if (text && !isMetaText(text)) this.setTitle(text, 1);
       }
     }
   }
@@ -208,7 +216,7 @@ export class TranscriptNormalizer {
       this.lastTokens.set(agentId, 0);
       return this.finish(agents, events);
     }
-    if (HOUSEKEEPING_TYPES.has(type)) return { agents: [], events: [] };
+    if (isHousekeepingType(type)) return { agents: [], events: [] };
 
     if (rec.cwd && !this.cwd) {
       this.cwd = rec.cwd;
@@ -257,7 +265,7 @@ export class TranscriptNormalizer {
         }
       } else {
         const text = textFromContent(rec.message?.content ?? rec.content);
-        if (text && META_CONTENT.test(text)) return this.finish(agents, events);
+        if (text && isMetaText(text)) return this.finish(agents, events);
         let label = truncate(text, 120);
         if (label) {
           this.setTitle(text, 1);
@@ -650,26 +658,26 @@ function safeJson(raw: string): any | null {
   try { return JSON.parse(raw); } catch { return null; }
 }
 
-function realTimestampOf(rec: any): number | null {
+export function realTimestampOf(rec: any): number | null {
   const v = rec.timestamp || rec.createdAt || rec.time;
   const n = typeof v === 'number' ? v : Date.parse(v || '');
   return Number.isFinite(n) ? n : null;
 }
 
-function contentBlocks(content: any): any[] {
+export function contentBlocks(content: any): any[] {
   if (Array.isArray(content)) return content;
   if (content == null) return [];
   return [{ type: 'text', text: String(content) }];
 }
 
-function textFromContent(content: any): string {
+export function textFromContent(content: any): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) return content.map(textFromContent).filter(Boolean).join(' ');
   if (content && typeof content === 'object') return String(content.text ?? content.content ?? '');
   return '';
 }
 
-function usageTokens(usage: any): number | null {
+export function usageTokens(usage: any): number | null {
   if (!usage || typeof usage !== 'object') return null;
   const keys = ['input_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens', 'output_tokens'];
   let total = 0;
@@ -693,7 +701,7 @@ export function relPath(p: string, cwd?: string): string {
 
 const PATH_KEYS = new Set(['file_path', 'path']);
 
-function summarizeInput(input: any, tool?: string, cwd?: string): string {
+export function summarizeInput(input: any, tool?: string, cwd?: string): string {
   if (input == null) return '';
   if (typeof input === 'string') return truncate(input, 90);
   if (typeof input !== 'object') return truncate(String(input), 90);
@@ -709,12 +717,12 @@ function summarizeInput(input: any, tool?: string, cwd?: string): string {
   return truncate(entries.join(', '), 90);
 }
 
-function bareIdOf(x: any): string {
+export function bareIdOf(x: any): string {
   if (x == null) return '';
   return String(x).replace(/^agent-/, '');
 }
 
-function failedResult(tur: any): boolean {
+export function failedResult(tur: any): boolean {
   if (!tur || typeof tur !== 'object') return false;
   return tur.interrupted === true || (typeof tur.exitCode === 'number' && tur.exitCode > 0);
 }

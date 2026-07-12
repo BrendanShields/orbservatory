@@ -138,6 +138,7 @@ const transport = new Transport({
 
 renderer.onSelect = (id) => { selectedId = id; renderer.selectedId = id; renderPanels(); };
 renderer.onSeek = (t) => { simT = t; livePinned = false; playing = false; panelsDirty = true; };
+renderer.inspectorEl = inspector;
 
 transport.connect();
 applyRoute(route, true);
@@ -401,9 +402,16 @@ function renderPanels() {
     selectedId = id; renderer.selectedId = id; renderer.focusId = id; renderPanels();
   }, showCompleted, () => { showCompleted = !showCompleted; renderPanels(); });
   const sum = active && active.id !== 'all-live' ? summaryOf(active.id) : undefined;
+  const serverSession = active && active !== imported && active.id !== 'all-live' ? active.id : null;
   renderInspector(inspector, active?.eng, simT, selectedId, active?.live ? active.eng.duration : undefined, (id) => {
     selectedId = id; renderer.selectedId = id; renderer.focusId = id; renderPanels();
-  }, () => { selectedId = null; renderer.selectedId = null; renderPanels(); }, sourceOfAgent, sum ? { cwd: sum.cwd, projectName: sum.projectName } : undefined);
+  }, () => { selectedId = null; renderer.selectedId = null; renderPanels(); }, sourceOfAgent, sum ? { cwd: sum.cwd, projectName: sum.projectName } : undefined, {
+    sessionId: serverSession,
+    live: !!active?.live,
+    eventCount: active?.awv.events.length ?? 0,
+    playing: playing || (livePinned && !!active?.live),
+    onSeek: (t) => { simT = t; livePinned = false; playing = false; panelsDirty = true; updateChrome(); },
+  });
 }
 
 function sourceOfAgent(agentId: string): string | undefined {

@@ -1,7 +1,10 @@
+import type { TranscriptItem } from '../shared/schema';
 import type { AgentStatus, Engine, EngineAgent } from './engine';
 import { colorOf, fmt, fmtT, ringColor, statusAt, tokensAt } from './engine';
 import { html, type Html } from './html';
 import { cleanLabel, maskProject } from './privacy';
+import { fetchTranscript } from './transport';
+import { toast } from './importer';
 
 /** Display name for an agent: paths collapsed everywhere, root project names masked when the privacy mask is on. */
 export function displayName(a: EngineAgent): string {
@@ -130,17 +133,82 @@ export function dedupeKicker(parts: Array<string | undefined>): string {
   return segs.filter((p, i) => p !== segs[i - 1]).join(' · ');
 }
 
-interface InspRefs { head: HTMLElement; kickerText: Text; h2: HTMLElement; pill: HTMLElement; task: HTMLElement; ctx: HTMLElement; stats: HTMLElement; chips: HTMLElement; children: HTMLElement; log: HTMLElement; logChips: HTMLElement }
-interface InspState { key: string; refs: InspRefs | null; last: Record<string, string>; logKind: LogKind; onSelect: (id: string) => void; onClose: () => void; rerender: () => void }
+/** The transcript tab exists only for a single server-backed session (not all-live merges or imported replays) whose provider has an extractor. */
+export function transcriptTabVisible(sessionId: string | null | undefined, unsupported: boolean): boolean {
+  return !!sessionId && !unsupported;
+}
+
+/** Index of the loaded row the playhead is on: the latest item with t <= simT (-1 when none). Items are in append order, so t is not globally sorted — linear scan. */
+export function followIndex(items: Array<{ t: number }>, simT: number): number {
+  let best = -1, bestT = -Infinity;
+  for (let i = 0; i < items.length; i++) {
+    const t = items[i].t;
+    if (t <= simT && t >= bestT) { best = i; bestT = t; }
+  }
+  return best;
+}
+
+/** Keeps the viewport anchored on the same row when older items are prepended above it. */
+export function prependAnchor(oldScrollTop: number, oldScrollHeight: number, newScrollHeight: number): number {
+  return oldScrollTop + Math.max(0, newScrollHeight - oldScrollHeight);
+}
+
+export interface InspectorTranscript {
+  /** Null hides the tab (all-live merge / imported replay). */
+  sessionId: string | null;
+  live: boolean;
+  eventCount: number;
+  playing: boolean;
+  onSeek: (t: number) => void;
+}
+
+const TR_PAGE = 200;
+/** Sessions whose provider answered `unsupported` — the tab stays hidden for the page load. */
+const trUnsupported = new Set<string>();
+
+interface TranscriptState {
+  key: string;
+  sessionId: string;
+  agent?: string;
+  items: TranscriptItem[];
+  total?: number;
+  loading: boolean;
+  gone: boolean;
+  follow: boolean;
+  atStart: boolean;
+  fetched: boolean;
+  gen: number;
+  renderedGen: number;
+  seq: number;
+  lastEventCount: number;
+  tailTimer: number | null;
+  scrollBottom: boolean;
+  anchor: boolean;
+  currentI: number;
+}
+
+function freshTr(key: string, sessionId: string, agent: string | undefined, eventCount: number): TranscriptState {
+  return { key, sessionId, agent, items: [], loading: false, gone: false, follow: true, atStart: false, fetched: false, gen: 0, renderedGen: -1, seq: 0, lastEventCount: eventCount, tailTimer: null, scrollBottom: false, anchor: false, currentI: -2 };
+}
+
+interface InspRefs { head: HTMLElement; kickerText: Text; h2: HTMLElement; tabs: HTMLElement; inspectPane: HTMLElement; pill: HTMLElement; task: HTMLElement; ctx: HTMLElement; stats: HTMLElement; chips: HTMLElement; children: HTMLElement; log: HTMLElement; logChips: HTMLElement; trPane: HTMLElement; trBar: HTMLElement; trList: HTMLElement }
+interface InspState { key: string; refs: InspRefs | null; last: Record<string, string>; logKind: LogKind; tab: 'inspect' | 'transcript'; trAll: boolean; tr: TranscriptState | null; onSelect: (id: string) => void; onClose: () => void; onSeek: ((t: number) => void) | null; rerender: () => void }
 const inspectors = new WeakMap<HTMLElement, InspState>();
 
-export function renderInspector(el: HTMLElement, eng: Engine | undefined, t: number, selectedId: string | null, liveNow: number | undefined, onSelect: (id: string) => void, onClose: () => void, sourceOf?: (agentId: string) => string | undefined, sessionMeta?: { cwd?: string; projectName?: string }) {
+export function renderInspector(el: HTMLElement, eng: Engine | undefined, t: number, selectedId: string | null, liveNow: number | undefined, onSelect: (id: string) => void, onClose: () => void, sourceOf?: (agentId: string) => string | undefined, sessionMeta?: { cwd?: string; projectName?: string }, transcript?: InspectorTranscript) {
   let st = inspectors.get(el);
   if (!st) {
-    const s: InspState = { key: '', refs: null, last: {}, logKind: 'all', onSelect, onClose, rerender: () => {} };
+    const s: InspState = { key: '', refs: null, last: {}, logKind: 'all', tab: 'inspect', trAll: false, tr: null, onSelect, onClose, onSeek: null, rerender: () => {} };
     el.addEventListener('click', e => {
       const target = e.target as HTMLElement;
       if (target.closest('.close')) { s.onClose(); return; }
+      const tab = target.closest<HTMLElement>('[data-tab]');
+      if (tab) { s.tab = tab.dataset.tab as 'inspect' | 'transcript'; s.rerender(); return; }
+      if (target.closest('[data-tr-all]')) { s.trAll = !s.trAll; s.rerender(); return; }
+      if (target.closest('[data-tr-follow]')) { if (s.tr) { s.tr.follow = true; s.tr.currentI = -2; } s.rerender(); return; }
+      if (target.closest('.t-more')) { target.closest('.t-row')?.classList.toggle('expanded'); return; }
+      const trow = target.closest<HTMLElement>('.t-row');
+      if (trow) { s.onSeek?.(Number(trow.dataset.t) || 0); return; }
       const c = target.closest<HTMLElement>('[data-child]');
       if (c) { s.onSelect(c.dataset.child!); return; }
       const f = target.closest<HTMLElement>('[data-logf]');
@@ -151,15 +219,17 @@ export function renderInspector(el: HTMLElement, eng: Engine | undefined, t: num
     inspectors.set(el, s);
     st = s;
   }
-  st.onSelect = onSelect; st.onClose = onClose;
-  st.rerender = () => renderInspector(el, eng, t, selectedId, liveNow, onSelect, onClose, sourceOf, sessionMeta);
+  st.onSelect = onSelect; st.onClose = onClose; st.onSeek = transcript?.onSeek ?? null;
+  st.rerender = () => renderInspector(el, eng, t, selectedId, liveNow, onSelect, onClose, sourceOf, sessionMeta, transcript);
   const sel = selectedId && eng ? eng.agents.get(selectedId) : undefined;
-  if (!eng || !sel) { el.hidden = true; el.innerHTML = ''; st.key = ''; st.refs = null; return; }
+  if (!eng || !sel) { el.hidden = true; el.innerHTML = ''; el.classList.remove('transcript-open'); st.key = ''; st.refs = null; return; }
   el.hidden = false;
   if (st.key !== selectedId) {
     el.innerHTML = `<div class="inspect-card">
       <div class="inspect-head"><span class="i-dot"></span><div class="inspect-kicker"></div><button class="close" title="Close" aria-label="Close inspector">×</button></div>
       <h2></h2>
+      <div class="inspect-tabs" role="tablist" aria-label="Inspector view"></div>
+      <div class="inspect-pane">
       <div class="status-pill"></div>
       <p class="task"></p>
       <div class="context-box"></div>
@@ -171,16 +241,48 @@ export function renderInspector(el: HTMLElement, eng: Engine | undefined, t: num
       <h3>Event log</h3>
       <div class="log-chips" role="group" aria-label="Filter event log"></div>
       <div class="event-log"></div>
+      </div>
+      <div class="transcript-pane" hidden>
+        <div class="transcript-bar" role="group" aria-label="Transcript controls"></div>
+        <div class="transcript-list" aria-label="Transcript"></div>
+      </div>
     </div>`;
     const q = (sl: string) => el.querySelector<HTMLElement>(sl)!;
     const kickerText = document.createTextNode('');
     q('.inspect-kicker').appendChild(kickerText);
-    st.refs = { head: q('.inspect-head'), kickerText, h2: q('h2'), pill: q('.status-pill'), task: q('.task'), ctx: q('.context-box'), stats: q('.i-stats'), chips: q('.chips'), children: q('.children'), log: q('.event-log'), logChips: q('.log-chips') };
+    st.refs = { head: q('.inspect-head'), kickerText, h2: q('h2'), tabs: q('.inspect-tabs'), inspectPane: q('.inspect-pane'), pill: q('.status-pill'), task: q('.task'), ctx: q('.context-box'), stats: q('.i-stats'), chips: q('.chips'), children: q('.children'), log: q('.event-log'), logChips: q('.log-chips'), trPane: q('.transcript-pane'), trBar: q('.transcript-bar'), trList: q('.transcript-list') };
     st.key = selectedId!;
     st.last = {};
+    if (st.tr) { st.tr.renderedGen = -1; st.tr.currentI = -2; }
+    const s = st;
+    // Scroll events fire for programmatic moves too, so they only drive
+    // pagination; follow disengages on user-intent inputs (wheel/touch).
+    st.refs.trList.addEventListener('scroll', () => {
+      const tr = s.tr;
+      if (!tr || !s.refs) return;
+      if (s.refs.trList.scrollTop < 40) trFetchOlder(s, tr);
+    });
+    const unfollow = () => {
+      const tr = s.tr;
+      if (tr?.follow) { tr.follow = false; s.rerender(); }
+    };
+    st.refs.trList.addEventListener('wheel', unfollow, { passive: true });
+    st.refs.trList.addEventListener('touchmove', unfollow, { passive: true });
   }
   const R = st.refs!, last = st.last;
   const setHtml = (k: string, node: HTMLElement, h: Html) => { if (last[k] !== h.s) { last[k] = h.s; node.innerHTML = h.s; } };
+  const trSession = transcript?.sessionId ?? null;
+  const tabVisible = transcriptTabVisible(trSession, trSession ? trUnsupported.has(trSession) : false);
+  if (!tabVisible && st.tab === 'transcript') st.tab = 'inspect';
+  const showTr = st.tab === 'transcript' && tabVisible;
+  setHtml('tabs', R.tabs, tabVisible
+    ? html`${(['inspect', 'transcript'] as const).map(k => html`<button data-tab="${k}" role="tab" aria-selected="${k === st.tab}" class="${k === st.tab ? 'on' : ''}">${k === 'inspect' ? 'Inspect' : 'Transcript'}</button>`)}`
+    : html``);
+  R.tabs.hidden = !tabVisible;
+  R.inspectPane.hidden = showTr;
+  R.trPane.hidden = !showTr;
+  el.classList.toggle('transcript-open', showTr);
+  if (showTr && transcript && trSession) renderTranscript(el, st, R, eng, t, selectedId!, trSession, transcript);
   const status = statusAt(sel, t, liveNow), tok = tokensAt(sel, t), lim = sel.def.limit || 1000000, pct = Math.min(1, tok / lim), [lbl, scol] = statusMeta(status);
   const col = colorOf(sel);
   const src = sourceOf?.(selectedId!);
@@ -240,6 +342,140 @@ export function renderInspector(el: HTMLElement, eng: Engine | undefined, t: num
     R.log.innerHTML = logHtml;
     if (oldTop > 0) R.log.scrollTop = oldTop + (R.log.scrollHeight - oldH);
   }
+}
+
+function renderTranscript(el: HTMLElement, st: InspState, R: InspRefs, eng: Engine, simT: number, selectedId: string, sessionId: string, ctx: InspectorTranscript) {
+  const key = `${sessionId}|${st.trAll ? '*' : selectedId}`;
+  let tr = st.tr;
+  if (!tr || tr.key !== key) {
+    if (tr?.tailTimer != null) clearTimeout(tr.tailTimer);
+    tr = st.tr = freshTr(key, sessionId, st.trAll ? undefined : selectedId, ctx.eventCount);
+    delete st.last.trBar;
+    trFetchInitial(st, tr);
+  }
+  if (tr.fetched && ctx.live && ctx.eventCount !== tr.lastEventCount) {
+    tr.lastEventCount = ctx.eventCount;
+    if (tr.tailTimer == null) {
+      const cur = tr;
+      tr.tailTimer = window.setTimeout(() => { cur.tailTimer = null; if (st.tr === cur) trFetchTail(st, cur); }, 500);
+    }
+  }
+  const count = tr.loading && !tr.items.length ? 'loading…' : `${tr.items.length}${tr.total != null && tr.total > tr.items.length ? ` of ${tr.total}` : ''} rows`;
+  const barKey = [st.trAll, tr.follow, count].join('|');
+  if (st.last.trBar !== barKey) {
+    st.last.trBar = barKey;
+    R.trBar.innerHTML = html`<button data-tr-all class="${st.trAll ? 'on' : ''}" aria-pressed="${st.trAll}">all agents</button><button data-tr-follow class="${tr.follow ? 'on' : ''}" aria-pressed="${tr.follow}" title="Auto-scroll to the playhead">follow</button><span class="t-count">${count}</span>`.s;
+  }
+  if (tr.renderedGen !== tr.gen) {
+    tr.renderedGen = tr.gen;
+    const list = R.trList;
+    const oldTop = list.scrollTop, oldH = list.scrollHeight;
+    const empty = tr.loading ? 'Loading transcript…' : tr.gone ? 'Transcript source file is gone.' : 'No transcript rows.';
+    list.innerHTML = (tr.items.length ? html`${tr.items.map(it => trRow(it, eng, st.trAll))}` : html`<em>${empty}</em>`).s;
+    if (tr.scrollBottom) { tr.scrollBottom = false; list.scrollTop = list.scrollHeight; }
+    else if (tr.anchor) { tr.anchor = false; list.scrollTop = prependAnchor(oldTop, oldH, list.scrollHeight); }
+    tr.currentI = -2;
+  }
+  // Level-triggered top pagination: a scroll-edge fetch can lose to an
+  // in-flight tail fetch on live sessions, so retry while parked at the top.
+  if (!tr.loading && !tr.atStart && tr.items.length && R.trList.scrollTop < 40 && R.trList.scrollHeight > R.trList.clientHeight) {
+    trFetchOlder(st, tr);
+  }
+  const fi = followIndex(tr.items, simT);
+  const curI = fi >= 0 ? tr.items[fi].i : -1;
+  if (curI !== tr.currentI) {
+    tr.currentI = curI;
+    R.trList.querySelector('.t-row.current')?.classList.remove('current');
+    if (curI >= 0) R.trList.querySelector(`[data-ti="${curI}"]`)?.classList.add('current');
+  }
+  if (curI >= 0 && tr.follow && (ctx.playing || ctx.live)) {
+    const list = R.trList;
+    const row = list.querySelector<HTMLElement>(`[data-ti="${curI}"]`);
+    if (row) {
+      const y = row.offsetTop - list.offsetTop;
+      if (y < list.scrollTop || y + row.offsetHeight > list.scrollTop + list.clientHeight) {
+        list.scrollTop = Math.max(0, y + row.offsetHeight - list.clientHeight + 8);
+      }
+    }
+  }
+}
+
+function trRow(it: TranscriptItem, eng: Engine, showAgent: boolean): Html {
+  const a = eng.agents.get(it.agent);
+  const who = showAgent ? html`<b class="t-who"><i style="background:${a ? colorOf(a) : 'var(--accent)'}"></i>${a ? displayName(a) : it.agent}</b>` : '';
+  const tool = it.tool ? html`<em class="t-tool">${it.tool}</em>` : '';
+  const more = it.truncated || it.text.length > 360 ? html`<i class="t-more" title="Expand">${it.truncated ? '…truncated' : '⋯'}</i>` : '';
+  return html`<button class="t-row role-${it.role}" data-ti="${it.i}" data-t="${it.t}"><time>${fmtT(it.t)}</time><span class="t-body">${who}${tool}<span class="t-text">${cleanLabel(it.text)}</span>${more}</span></button>`;
+}
+
+function trApply(st: InspState, tr: TranscriptState, mutate: () => void) {
+  mutate();
+  tr.gen++;
+  if (st.tr === tr) st.rerender();
+}
+
+function trFetchInitial(st: InspState, tr: TranscriptState) {
+  tr.loading = true;
+  const seq = ++tr.seq;
+  void fetchTranscript(tr.sessionId, { agent: tr.agent, limit: TR_PAGE }).then((res) => {
+    if (tr.seq !== seq || st.tr !== tr) return;
+    tr.loading = false;
+    tr.fetched = true;
+    if (res && 'unsupported' in res) { trUnsupported.add(tr.sessionId); st.tab = 'inspect'; st.rerender(); return; }
+    if (res && 'gone' in res) { toast('Transcript unavailable: source file is gone'); trApply(st, tr, () => { tr.gone = true; }); return; }
+    trApply(st, tr, () => {
+      if (!res) return;
+      tr.items = res.items;
+      tr.total = res.total;
+      tr.atStart = res.nextCursor == null;
+      tr.scrollBottom = true;
+    });
+  });
+}
+
+function trFetchOlder(st: InspState, tr: TranscriptState) {
+  if (tr.loading || tr.atStart || !tr.items.length) return;
+  tr.loading = true;
+  const seq = ++tr.seq;
+  const before = tr.items[0].i;
+  void fetchTranscript(tr.sessionId, { agent: tr.agent, before, limit: TR_PAGE }).then((res) => {
+    if (tr.seq !== seq || st.tr !== tr) return;
+    tr.loading = false;
+    if (!res || 'unsupported' in res) return;
+    if ('gone' in res) { toast('Transcript unavailable: source file is gone'); trApply(st, tr, () => { tr.gone = true; }); return; }
+    const fresh = res.items.filter((x) => x.i < before);
+    trApply(st, tr, () => {
+      if (!fresh.length) { tr.atStart = true; return; }
+      tr.items = [...fresh, ...tr.items];
+      tr.atStart = res.nextCursor == null;
+      tr.anchor = true;
+    });
+  });
+}
+
+function trFetchTail(st: InspState, tr: TranscriptState) {
+  if (tr.loading || !tr.items.length) { if (!tr.items.length && tr.fetched && !tr.loading) trFetchInitial(st, tr); return; }
+  tr.loading = true;
+  const seq = ++tr.seq;
+  const after = tr.items[tr.items.length - 1].i;
+  void fetchTranscript(tr.sessionId, { agent: tr.agent, after, limit: TR_PAGE }).then((res) => {
+    if (tr.seq !== seq || st.tr !== tr) return;
+    tr.loading = false;
+    if (!res || 'unsupported' in res) return;
+    if ('gone' in res) { trApply(st, tr, () => { tr.gone = true; }); return; }
+    if (!res.items.length) return;
+    trApply(st, tr, () => {
+      const maxI = res.items[res.items.length - 1].i;
+      if (maxI <= after) {
+        // i regressed: the session was rewritten in place — replace the list wholesale.
+        tr.items = res.items;
+        tr.atStart = res.nextCursor == null;
+      } else {
+        tr.items = [...tr.items, ...res.items.filter((x) => x.i > after)];
+      }
+      if (tr.follow) tr.scrollBottom = true;
+    });
+  });
 }
 
 function runStats(a: import('../shared/schema').AwvAgent): Html {

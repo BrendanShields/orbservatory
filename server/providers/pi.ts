@@ -1,11 +1,13 @@
-import { readdir, stat } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { join, dirname, basename } from 'node:path';
 import { homedir } from 'node:os';
+import type { TranscriptItem, TranscriptResponse } from '../../shared/schema';
 import type { SessionStore, SessionState } from '../store';
 import type { SessionProvider } from './types';
-import { PiNormalizer } from './pi-normalizer';
+import { PiNormalizer, blocksOf, strOf, summarizeArgs, textOf, totalTokens } from './pi-normalizer';
 import { tailLines } from './tail';
 import { readFileSlice } from '../fileSlice';
+import { capText, extractClock, pageItems, type TranscriptQuery } from '../transcript';
 
 interface PiOptions {
   root?: string;
@@ -86,6 +88,22 @@ export class PiProvider implements SessionProvider {
   async ensureLoaded(state: SessionState) {
     if (state.loaded) return;
     await this.processSession(state);
+  }
+
+  async transcript(state: SessionState, q: TranscriptQuery): Promise<TranscriptResponse | null> {
+    const text = await readFile(state.rootFile, 'utf8');
+    const items: TranscriptItem[] = [];
+    const clock = extractClock();
+    const agentId = `session:${state.sessionId}`;
+    let lastTokens = 0;
+    for (const line of text.split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      const rec = safeJson(line);
+      if (!rec || typeof rec !== 'object') continue;
+      lastTokens = piLineItems(rec, agentId, clock, lastTokens, items);
+    }
+    items.forEach((it, idx) => { it.i = idx; });
+    return pageItems(items, q);
   }
 
   async scan() {
@@ -192,6 +210,70 @@ export class PiProvider implements SessionProvider {
     this.heads.set(path, head);
     return head;
   }
+}
+
+/** Returns the updated token watermark (pi has a single root agent). */
+function piLineItems(rec: any, agentId: string, clock: ReturnType<typeof extractClock>, lastTokens: number, out: TranscriptItem[]): number {
+  // The normalizer clocks every entry (session header included) — mirror that or t drifts.
+  const inner = Number(rec?.message?.timestamp);
+  const outer = Date.parse(rec?.timestamp || '');
+  const real = Number.isFinite(inner) && inner > 0 ? inner : Number.isFinite(outer) ? outer : null;
+  const { ts, t } = clock.at(real);
+  if (String(rec.type || '') !== 'message') return lastTokens;
+  const msg = rec.message;
+  if (!msg || typeof msg !== 'object') return lastTokens;
+  const iso = new Date(ts).toISOString();
+  const push = (role: TranscriptItem['role'], text: string, extra?: Partial<TranscriptItem>) => {
+    const c = capText(text);
+    const item: TranscriptItem = { i: 0, t, ts: iso, role, agent: agentId, text: c.text, ...extra };
+    if (c.truncated) item.truncated = true;
+    out.push(item);
+  };
+  const role = String(msg.role || '');
+
+  if (role === 'user') {
+    const text = textOf(msg.content);
+    if (text.trim()) push('user', text);
+    return lastTokens;
+  }
+  if (role === 'assistant') {
+    let tokens: number | undefined;
+    const total = totalTokens(msg.usage);
+    if (total != null) {
+      const diff = total - lastTokens;
+      if (diff > 0) tokens = diff;
+      lastTokens = total;
+    }
+    let toolIdx = 0;
+    for (const block of blocksOf(msg.content)) {
+      if (!block || typeof block !== 'object') continue;
+      if (block.type === 'text' && block.text) {
+        push('assistant', String(block.text), tokens != null ? { tokens } : undefined);
+        tokens = undefined;
+      } else if (block.type === 'toolCall') {
+        const extra: Partial<TranscriptItem> = { tool: String(block.name || 'tool'), t: t + toolIdx * 30 };
+        if (tokens != null) { extra.tokens = tokens; tokens = undefined; }
+        push('tool', summarizeArgs(block.arguments), extra);
+        toolIdx++;
+      }
+    }
+    const stop = String(msg.stopReason || '');
+    if (stop === 'error' || stop === 'aborted') push('error', strOf(msg.errorMessage) || stop);
+    return lastTokens;
+  }
+  if (role === 'toolResult') {
+    const tool = strOf(msg.toolName) || undefined;
+    push(msg.isError ? 'error' : 'tool-result', textOf(msg.content) || (msg.isError ? `${tool || 'tool'} failed` : 'result'), { tool });
+    return lastTokens;
+  }
+  if (role === 'bashExecution') {
+    push('tool', strOf(msg.command), { tool: 'bash' });
+    const exit = Number(msg.exitCode);
+    const failed = Number.isFinite(exit) && exit !== 0 && !msg.cancelled;
+    const output = strOf(msg.output);
+    if (output || failed) push(failed ? 'error' : 'tool-result', output || `exit ${exit}`, { tool: 'bash' });
+  }
+  return lastTokens;
 }
 
 async function walkSessions(root: string): Promise<string[]> {

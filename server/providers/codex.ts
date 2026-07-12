@@ -1,11 +1,13 @@
-import { readdir, stat } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { join, dirname, basename } from 'node:path';
 import { homedir } from 'node:os';
+import type { TranscriptItem, TranscriptResponse } from '../../shared/schema';
 import type { SessionStore, SessionState } from '../store';
 import type { SessionProvider } from './types';
-import { CodexNormalizer, type CodexLineSource } from './codex-normalizer';
+import { CodexNormalizer, outputFailure, outputText, summarizeArgs, type CodexLineSource } from './codex-normalizer';
 import { tailLines } from './tail';
 import { readFileSlice } from '../fileSlice';
+import { capText, extractClock, pageItems, type TranscriptQuery } from '../transcript';
 
 interface CodexOptions {
   root?: string;
@@ -90,6 +92,32 @@ export class CodexProvider implements SessionProvider {
   async ensureLoaded(state: SessionState) {
     if (state.loaded) return;
     await this.processSession(state);
+  }
+
+  async transcript(state: SessionState, q: TranscriptQuery): Promise<TranscriptResponse | null> {
+    const files = this.sessionFiles.get(state.id)
+      ?? [{ path: state.rootFile, head: { threadId: state.sessionId, subagent: false }, mtime: 0, size: 0 } satisfies RolloutFile];
+    const items: TranscriptItem[] = [];
+    const clock = extractClock();
+    const toolNames = new Map<string, string>();
+    const rootId = `session:${state.sessionId}`;
+    for (const file of files) {
+      let text: string;
+      try {
+        text = await readFile(file.path, 'utf8');
+      } catch (err) {
+        if (file.path === state.rootFile) throw err;
+        continue;
+      }
+      const agentId = file.head.subagent ? `${rootId}:agent-${file.head.threadId}` : rootId;
+      for (const line of text.split(/\r?\n/)) {
+        if (!line.trim()) continue;
+        const rec = safeJson(line);
+        if (rec && typeof rec === 'object') codexLineItems(rec, agentId, clock, toolNames, items);
+      }
+    }
+    items.forEach((it, idx) => { it.i = idx; });
+    return pageItems(items, q);
   }
 
   async scan() {
@@ -223,6 +251,53 @@ export class CodexProvider implements SessionProvider {
       : { threadId: fallbackId, subagent: false };
     this.heads.set(path, head);
     return head;
+  }
+}
+
+function codexLineItems(rec: any, agentId: string, clock: ReturnType<typeof extractClock>, toolNames: Map<string, string>, out: TranscriptItem[]) {
+  const payload = rec.payload;
+  if (!payload || typeof payload !== 'object') return;
+  const type = String(rec.type || '');
+  const v = rec.timestamp;
+  const n = typeof v === 'number' ? v : Date.parse(v || '');
+  const { ts, t } = clock.at(Number.isFinite(n) ? n : null);
+  const iso = new Date(ts).toISOString();
+  const push = (role: TranscriptItem['role'], text: string, tool?: string) => {
+    const c = capText(text);
+    const item: TranscriptItem = { i: 0, t, ts: iso, role, agent: agentId, text: c.text };
+    if (c.truncated) item.truncated = true;
+    if (tool) item.tool = tool;
+    out.push(item);
+  };
+
+  if (type === 'response_item') {
+    const pt = String(payload.type || '');
+    if (pt === 'function_call' || pt === 'custom_tool_call' || pt === 'web_search_call') {
+      const tool = String(payload.name || (pt === 'web_search_call' ? 'web_search' : 'tool'));
+      if (payload.call_id) toolNames.set(String(payload.call_id), tool);
+      push('tool', summarizeArgs(payload.arguments ?? payload.input ?? payload.action), tool);
+    } else if (pt === 'function_call_output' || pt === 'custom_tool_call_output') {
+      const callId = payload.call_id ? String(payload.call_id) : '';
+      const failure = outputFailure(payload.output);
+      const tool = toolNames.get(callId);
+      push(failure.failed ? 'error' : 'tool-result', outputText(payload.output) || (failure.failed ? `${tool || 'tool'} failed` : 'result'), tool);
+    }
+    return;
+  }
+
+  if (type === 'event_msg') {
+    const pt = String(payload.type || '');
+    if (pt === 'user_message') {
+      const text = String(payload.message ?? '');
+      if (text.trim()) push('user', text);
+    } else if (pt === 'agent_message') {
+      const text = String(payload.message ?? '');
+      if (text.trim()) push('assistant', text);
+    } else if (pt === 'error' || pt === 'stream_error') {
+      push('error', String(payload.message ?? 'error'));
+    } else if (pt === 'turn_aborted') {
+      push('error', `turn aborted: ${String(payload.reason ?? 'interrupted')}`);
+    }
   }
 }
 

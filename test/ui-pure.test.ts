@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { paletteCandidates, type NodeCandidate } from '../web/palette';
-import { filterAgents, logFilter, dedupeKicker } from '../web/panels';
+import { filterAgents, logFilter, dedupeKicker, followIndex, prependAnchor, transcriptTabVisible } from '../web/panels';
 import type { SessionSummary } from '../shared/schema';
 import type { EngineAgent } from '../web/engine';
 
@@ -76,4 +76,27 @@ test('dedupeKicker collapses consecutive duplicate segments', () => {
   expect(dedupeKicker(['root', 'root', 'claude'])).toBe('root · claude');
   expect(dedupeKicker(['agent', 'child of x', 'claude'])).toBe('agent · child of x · claude');
   expect(dedupeKicker(['root', undefined, 'root'])).toBe('root');
+});
+
+test('followIndex picks the latest row with t <= simT across non-monotonic append order', () => {
+  const items = [{ t: 0 }, { t: 1000 }, { t: 5000 }, { t: 2000 }];
+  expect(followIndex([], 100)).toBe(-1);
+  expect(followIndex(items, -1)).toBe(-1);
+  expect(followIndex(items, 0)).toBe(0);
+  expect(followIndex(items, 1500)).toBe(1);
+  expect(followIndex(items, 2500)).toBe(3);
+  expect(followIndex(items, 9000)).toBe(2);
+});
+
+test('prependAnchor keeps the viewport on the same row after a prepend', () => {
+  expect(prependAnchor(100, 400, 1000)).toBe(700);
+  expect(prependAnchor(0, 400, 900)).toBe(500);
+  expect(prependAnchor(100, 400, 300)).toBe(100);
+});
+
+test('transcriptTabVisible hides the tab without a server session or when unsupported', () => {
+  expect(transcriptTabVisible('demo/s1', false)).toBe(true);
+  expect(transcriptTabVisible('demo/s1', true)).toBe(false);
+  expect(transcriptTabVisible(null, false)).toBe(false);
+  expect(transcriptTabVisible(undefined, false)).toBe(false);
 });

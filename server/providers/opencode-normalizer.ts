@@ -321,13 +321,13 @@ function totalOf(tokens: any): number | null {
   return seen ? sum : null;
 }
 
-function errorLabel(error: any): string {
+export function errorLabel(error: any): string {
   if (typeof error === 'string') return error;
   if (error && typeof error === 'object') return String(error.data?.message ?? error.message ?? error.name ?? 'error');
   return 'error';
 }
 
-function summarizeInput(input: any): string {
+export function summarizeInput(input: any): string {
   if (input == null) return '';
   if (typeof input === 'string') return input;
   if (typeof input !== 'object') return String(input);

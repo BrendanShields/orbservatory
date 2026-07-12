@@ -162,7 +162,7 @@ export class CopilotNormalizer implements SessionNormalizer {
   }
 }
 
-function messageText(rec: any): string {
+export function messageText(rec: any): string {
   const type = String(rec.type || '');
   if (!/message/i.test(type)) return '';
   const data = rec.data ?? {};
@@ -173,7 +173,7 @@ function messageText(rec: any): string {
   return '';
 }
 
-function messageRole(rec: any): string {
+export function messageRole(rec: any): string {
   const type = String(rec.type || '').toLowerCase();
   const role = String(rec.data?.role ?? rec.role ?? '').toLowerCase();
   if (role) return role;
@@ -194,7 +194,7 @@ function metricsTokens(metrics: any): number {
   return sum;
 }
 
-function summarize(args: any): string {
+export function summarize(args: any): string {
   if (args == null) return '';
   if (typeof args === 'string') {
     const parsed = safeJson(args);

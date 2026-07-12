@@ -2,15 +2,16 @@ import { watch, type FSWatcher } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import type { AwvEvent } from '../../shared/schema';
+import type { AwvEvent, TranscriptItem, TranscriptResponse } from '../../shared/schema';
 import type { SessionStore, SessionState } from '../store';
 import type { SubagentMeta, TranscriptSource } from '../normalizer';
-import { TranscriptNormalizer } from '../normalizer';
+import { TranscriptNormalizer, bareIdOf, contentBlocks, failedResult, isHousekeepingType, isMetaText, realTimestampOf, rootAgentId, summarizeInput, textFromContent, usageTokens } from '../normalizer';
 import type { SessionProvider } from './types';
 import { tailLines } from './tail';
 import { computeSessionStats } from '../stats';
 import { StatsCache, fingerprintOf, type FileStamp } from '../statsCache';
 import { readFileSlice } from '../fileSlice';
+import { capText, extractClock, pageItems, type TranscriptQuery } from '../transcript';
 
 interface WatchOptions {
   root?: string;
@@ -108,6 +109,34 @@ export class ClaudeProjectWatcher implements SessionProvider {
   async ensureLoaded(state: SessionState) {
     if (state.loaded) return;
     await this.processSession(state);
+  }
+
+  async transcript(state: SessionState, q: TranscriptQuery): Promise<TranscriptResponse | null> {
+    const sources = await this.discoverSources(state, false);
+    const items: TranscriptItem[] = [];
+    const clock = extractClock({ rebase: true });
+    const lastTokens = new Map<string, number>();
+    const toolNames = new Map<string, string>();
+    for (const fs of sources) {
+      if (fs.source.kind === 'workflow-journal') continue;
+      let text: string;
+      try {
+        text = await readFile(fs.path, 'utf8');
+      } catch (err) {
+        if (fs.path === state.rootFile) throw err;
+        continue;
+      }
+      const agentId = fs.source.kind === 'root'
+        ? rootAgentId(state.sessionId)
+        : `${rootAgentId(state.sessionId)}:agent-${bareIdOf(fs.source.agentId)}`;
+      for (const line of text.split(/\r?\n/)) {
+        if (!line.trim()) continue;
+        const rec = safeJson(line);
+        if (rec && typeof rec === 'object') claudeLineItems(rec, agentId, state.cwd || this.normalizerOf(state).cwd, clock, lastTokens, toolNames, items);
+      }
+    }
+    items.forEach((it, idx) => { it.i = idx; });
+    return pageItems(items, q);
   }
 
   async scan() {
@@ -374,6 +403,77 @@ export class ClaudeProjectWatcher implements SessionProvider {
     this.store.merge(state, agents, events);
     return false;
   }
+}
+
+/** One transcript line → readable rows, mirroring the normalizer's skip/summarize rules. */
+function claudeLineItems(rec: any, agentId: string, cwd: string | undefined, clock: ReturnType<typeof extractClock>, lastTokens: Map<string, number>, toolNames: Map<string, string>, out: TranscriptItem[]) {
+  const type = String(rec.type || '');
+  if (type === 'summary' || type === 'ai-title' || type === 'custom-title') return;
+  if (type === 'system' && rec.subtype === 'compact_boundary') { clock.at(realTimestampOf(rec)); return; }
+  if (isHousekeepingType(type)) return;
+  const { ts, t } = clock.at(realTimestampOf(rec));
+  const iso = new Date(ts).toISOString();
+  const push = (role: TranscriptItem['role'], text: string, extra?: Partial<TranscriptItem>) => {
+    const c = capText(text);
+    const item: TranscriptItem = { i: 0, t, ts: iso, role, agent: agentId, text: c.text, ...extra };
+    if (c.truncated) item.truncated = true;
+    out.push(item);
+  };
+  const content = rec.message?.content ?? rec.content;
+
+  if (type === 'user') {
+    const rawText = textFromContent(content);
+    if (rawText.includes('<task-notification>') || rec.isMeta || rec.isCompactSummary) return;
+    const blocks = contentBlocks(content);
+    const toolResults = blocks.filter((b) => b && typeof b === 'object' && b.type === 'tool_result');
+    if (toolResults.length) {
+      for (const block of toolResults) {
+        const useId = String(block.tool_use_id || block.toolUseId || '');
+        const failed = block.is_error || failedResult(rec.toolUseResult);
+        const text = textFromContent(block.content) || (failed ? 'tool error' : 'result');
+        push(failed ? 'error' : 'tool-result', text, { tool: toolNames.get(useId) });
+      }
+      return;
+    }
+    if (rawText && isMetaText(rawText)) return;
+    if (rawText) push('user', rawText);
+    else if (blocks.some((b) => b && typeof b === 'object' && b.type === 'image')) push('user', '[image]');
+    return;
+  }
+
+  if (type === 'assistant') {
+    if (rec.isApiErrorMessage) {
+      push('error', textFromContent(content) || 'API error');
+      return;
+    }
+    const usageTotal = usageTokens(rec.message?.usage ?? rec.usage);
+    let tokens: number | undefined;
+    if (usageTotal != null) {
+      const diff = usageTotal - (lastTokens.get(agentId) ?? 0);
+      if (diff > 0) tokens = diff;
+      lastTokens.set(agentId, usageTotal);
+    }
+    let toolIdx = 0;
+    for (const block of contentBlocks(content)) {
+      if (!block || typeof block !== 'object') continue;
+      if (block.type === 'text' && block.text) {
+        push('assistant', String(block.text), tokens != null ? { tokens } : undefined);
+        tokens = undefined;
+      } else if (block.type === 'tool_use') {
+        const tool = String(block.name || 'tool');
+        if (block.id) toolNames.set(String(block.id), tool);
+        // Same 30ms stagger the normalizer applies to tool events, so click-seek lands exactly.
+        const extra: Partial<TranscriptItem> = { tool, t: t + toolIdx * 30 };
+        if (tokens != null) { extra.tokens = tokens; tokens = undefined; }
+        push('tool', summarizeInput(block.input, tool, cwd), extra);
+        toolIdx++;
+      }
+    }
+  }
+}
+
+function safeJson(raw: string): any | null {
+  try { return JSON.parse(raw); } catch { return null; }
 }
 
 async function readMeta(jsonlPath: string, slug: string): Promise<SubagentMeta | null> {
