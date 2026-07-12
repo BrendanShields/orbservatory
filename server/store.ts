@@ -2,6 +2,7 @@ import type { AwvAgent, AwvEvent, AwvSession, ModelPricing, SearchPart, SessionS
 import { eventRank } from '../shared/order';
 import { TranscriptNormalizer } from './normalizer';
 import type { SessionNormalizer } from './providers/types';
+import type { FileCursor } from './providers/tail';
 import { computeSessionStats, DEFAULT_TIER_THRESHOLDS, finalizeStats } from './stats';
 
 export interface SessionState {
@@ -21,7 +22,7 @@ export interface SessionState {
   normalizer: SessionNormalizer;
   agents: Map<string, AwvAgent>;
   events: AwvEvent[];
-  files: Map<string, { offset: number; buffer: string; sourceKey: string }>;
+  files: Map<string, FileCursor>;
   /** Pricing-independent stats — recomputed from the live normalizer or restored from the disk cache. */
   statsBase?: SessionStatsBase;
   /** Loaded sessions have stale statsBase until the next flush. */
@@ -181,6 +182,34 @@ export class SessionStore {
     state.loaded = true;
     state.loading = false;
     state.statsDirty = true;
+  }
+
+  /**
+   * A source file was rewritten in place (shrunk): every event already derived
+   * from the old contents is stale, so drop all derived state and let the
+   * provider re-ingest from scratch. `loading` stays true until finishLoad so
+   * merge() doesn't stream the re-read as incremental events.
+   */
+  resetSession(state: SessionState, makeNormalizer?: () => SessionNormalizer) {
+    state.agents.clear();
+    state.events.length = 0;
+    state.files.clear();
+    const normalizer = makeNormalizer
+      ? makeNormalizer()
+      : new TranscriptNormalizer({ sessionId: state.sessionId, project: state.project, cwd: state.cwd, contextLimits: this.contextLimits });
+    if (makeNormalizer) normalizer.setContextLimits(this.contextLimits);
+    state.normalizer = normalizer;
+    state.loaded = false;
+    state.loading = true;
+    state.statsDirty = true;
+  }
+
+  /** Replace subscribers' copy of a session wholesale (after an in-place rewrite re-ingest). */
+  pushSnapshot(state: SessionState) {
+    const msg: ServerMessage = { type: 'snapshot', sessionId: state.id, session: this.snapshot(state), eventOffset: 0, done: true };
+    for (const sub of this.subscribers) {
+      if (sub.wants(state)) sub.send(msg);
+    }
   }
 
   /** Stats + search doc computed off-thread of the live pipeline (cache hit or background full parse). */

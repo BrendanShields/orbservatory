@@ -64,7 +64,7 @@ export class SettingsModal {
       <label class="set-row"><input type="checkbox" id="setOrchName" ${s.showOrchestratorName !== false ? 'checked' : ''}><span>Show orchestrator name <em>(hover always shows)</em></span></label>
       <label class="set-row col"><span>Per-model context limits (JSON)</span><input type="text" id="setLimits" spellcheck="false" value="${esc(limits)}" placeholder="{&quot;claude-haiku-4-5&quot;: 200000}"></label>
       <h3 class="set-head">Ingestion</h3>
-      ${(['claude', 'codex', 'opencode', 'copilot'] as const).map(p => `<label class="set-row"><input type="checkbox" class="setProv" data-src="${p}" ${s.providers?.[p] !== false ? 'checked' : ''}><span>Ingest ${p} sessions</span></label>`).join('')}
+      ${(['claude', 'codex', 'opencode', 'copilot', 'pi'] as const).map(p => `<label class="set-row"><input type="checkbox" class="setProv" data-src="${p}" ${s.providers?.[p] !== false ? 'checked' : ''}><span>Ingest ${p} sessions</span></label>`).join('')}
       <label class="set-row"><span>Liveness window (minutes)</span><input type="number" id="setLiveness" min="1" max="1440" step="1" value="${Math.round(s.livenessMs / 60000)}"></label>
       <label class="set-row"><span>Poll interval (ms)</span><input type="number" id="setPoll" min="250" max="60000" step="50" value="${s.pollMs}"></label>
       <h3 class="set-head">Server</h3>

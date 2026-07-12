@@ -5,6 +5,7 @@ import { ClaudeProjectWatcher } from './providers/claude';
 import { CodexProvider, defaultCodexRoot } from './providers/codex';
 import { OpencodeProvider, defaultOpencodeDataDir, findOpencodeDb } from './providers/opencode';
 import { CopilotProvider, defaultCopilotRoot } from './providers/copilot';
+import { PiProvider, defaultPiRoot } from './providers/pi';
 import type { SessionProvider } from './providers/types';
 import { StatsCache } from './statsCache';
 import { searchDocs } from './searchIndex';
@@ -55,6 +56,7 @@ export class VisualiserRuntime {
       codex: () => (existsSync(defaultCodexRoot()) ? new CodexProvider(this.store, { pollMs: cfg.pollMs, livenessMs: cfg.livenessMs }) : null),
       opencode: () => (findOpencodeDb(defaultOpencodeDataDir()) ? new OpencodeProvider(this.store, { pollMs: cfg.pollMs, livenessMs: cfg.livenessMs }) : null),
       copilot: () => (existsSync(defaultCopilotRoot()) ? new CopilotProvider(this.store, { pollMs: cfg.pollMs, livenessMs: cfg.livenessMs }) : null),
+      pi: () => (existsSync(defaultPiRoot()) ? new PiProvider(this.store, { pollMs: cfg.pollMs, livenessMs: cfg.livenessMs }) : null),
     };
   }
 

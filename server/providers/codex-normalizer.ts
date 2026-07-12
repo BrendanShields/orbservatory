@@ -146,7 +146,20 @@ export class CodexNormalizer implements SessionNormalizer {
         push({ t, type: 'complete', agent: agentId, label: 'task complete' });
       } else if (pt === 'error' || pt === 'stream_error') {
         push({ t, type: 'error', agent: agentId, label: truncate(String(payload.message ?? 'error'), 96) });
+      } else if (pt === 'turn_aborted') {
+        push({ t, type: 'error', agent: agentId, label: truncate(`turn aborted: ${String(payload.reason ?? 'interrupted')}`, 96) });
+      } else if (pt === 'patch_apply_end' && payload.success === false) {
+        push({ t, type: 'error', agent: agentId, label: 'patch failed to apply' });
+      } else if (pt === 'context_compacted' || pt === 'compacted') {
+        push({ t, type: 'compact', agent: agentId, to: 0, label: 'context compacted' });
+        this.lastTokens.set(agentId, 0);
       }
+      return { agents, events };
+    }
+
+    if (type === 'compacted') {
+      push({ t, type: 'compact', agent: agentId, to: 0, label: 'context compacted' });
+      this.lastTokens.set(agentId, 0);
       return { agents, events };
     }
 
@@ -230,7 +243,20 @@ function totalTokens(payload: any): number | null {
 
 function outputFailure(output: any): { failed: boolean; exitCode?: number; label?: string } {
   let obj = output;
-  if (typeof output === 'string') obj = safeJson(output);
+  if (typeof output === 'string') {
+    obj = safeJson(output);
+    // Current Codex writes plain-text shell output ("…\nProcess exited with
+    // code N\nOutput:\n…"), not JSON — parse the exit code out of the text.
+    if (!obj) {
+      const m = /(?:^|\n)Process exited with code (\d+)/.exec(output);
+      if (m) {
+        const exit = Number(m[1]);
+        const body = output.split(/\nOutput:\n/)[1] ?? output;
+        return { failed: exit !== 0, exitCode: exit, label: exit !== 0 ? firstLine(body) : undefined };
+      }
+      return { failed: false };
+    }
+  }
   if (obj && typeof obj === 'object') {
     const exit = Number(obj.metadata?.exit_code ?? obj.exit_code);
     if (Number.isFinite(exit)) {

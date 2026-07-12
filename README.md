@@ -1,6 +1,6 @@
 # orbservatory
 
-A local web app that visualises Claude Code, Codex, opencode, and GitHub Copilot coding sessions as a live animated agent graph. It watches local transcript/session stores, normalizes them into the AWV (Agentic Workflow Visualizer) schema, and streams sessions over WebSocket to a canvas frontend with timeline replay.
+A local web app that visualises Claude Code, Codex, opencode, GitHub Copilot, and pi coding sessions as a live animated agent graph. It watches local transcript/session stores, normalizes them into the AWV (Agentic Workflow Visualizer) schema, and streams sessions over WebSocket to a canvas frontend with timeline replay.
 
 ## Install
 
@@ -30,6 +30,8 @@ By default the server scans Claude Code transcripts from `~/.claude/projects`. F
 ```bash
 CLAUDE_PROJECTS_DIR=/path/to/projects pnpm dev
 ```
+
+Other providers are discovered automatically when their stores exist: Codex (`~/.codex/sessions`, or `CODEX_HOME`), opencode (`~/.local/share/opencode`, or `OPENCODE_DATA_DIR`/`XDG_DATA_HOME`; needs Node ≥ 22.13 for `node:sqlite`), GitHub Copilot CLI (`~/.copilot/session-state`, or `COPILOT_HOME`), and pi (`~/.pi/agent/sessions`, or `PI_CODING_AGENT_DIR`/`PI_CODING_AGENT_SESSION_DIR`). Each can be toggled in settings.
 
 ## App structure
 

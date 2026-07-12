@@ -69,7 +69,7 @@ export function renderRail(el: HTMLElement, eng: Engine | undefined, t: number, 
   st.toggle.hidden = !onToggleCompleted;
   st.toggle.classList.toggle('on', showCompleted);
   st.toggle.setAttribute('aria-pressed', String(showCompleted));
-  if (!eng) { st.count.textContent = ''; railEmpty(st, 'Waiting for Claude sessions…'); return; }
+  if (!eng) { st.count.textContent = ''; railEmpty(st, 'Waiting for sessions…'); return; }
   let live = 0, done = 0;
   const all: Array<{ id: string; a: EngineAgent; status: AgentStatus }> = [];
   for (const id of eng.order) {
