@@ -354,3 +354,30 @@ tr.srow:hover,tr.srow:focus-visible{background:rgba(var(--accent-rgb),.06);outli
 .t-row .t-more{display:block;font-style:normal;font-family:'JetBrains Mono',monospace;font-size:8.5px;color:rgba(var(--text-dim-rgb),.55);margin-top:2px}
 .t-row .t-more:hover{color:var(--accent-bright)}
 @media(max-width:900px){.inspector.transcript-open{width:calc(100% - 24px)}}
+
+/* ---------- Insights trends page (#/insights) ---------- */
+.insights-root[hidden]{display:none}
+.insights-root{position:absolute;inset:0;overflow-y:auto;animation:viewIn .16s ease-out}
+.insights{max-width:1180px;margin:0 auto;padding:0 22px 48px;font-family:Outfit,sans-serif;color:var(--text)}
+.insights-head{position:sticky;top:0;z-index:5;display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 -22px 16px;padding:14px 22px;background:rgba(var(--bg-rgb),.86);backdrop-filter:blur(14px);border-bottom:1px solid rgba(var(--chrome-rgb),.08)}
+.insights-head .brand b{font-size:12px}
+.insights-head .brand span{display:block;font-family:'JetBrains Mono',monospace;font-size:7.5px;color:rgba(var(--text-dim-rgb),.5);letter-spacing:.26em}
+.ins-ranges{display:flex;gap:5px}
+.ins-charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(430px,100%),1fr));gap:14px}
+.ins-charts[hidden]{display:none}
+.chart-card{position:relative;border:1px solid rgba(var(--chrome-rgb),.12);border-radius:14px;background:rgba(var(--panel-rgb),.45);padding:12px 14px}
+.chart-card h3{margin:0 0 10px;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:rgba(var(--chrome-rgb),.75);font-weight:600}
+.chart-card canvas{display:block;width:100%;height:196px;touch-action:pan-y}
+.chart-card canvas[hidden]{display:none}
+.ins-tip{bottom:auto;top:8px;font-size:10px;line-height:1.55;text-align:left}
+.ins-tip em{font-style:normal;color:rgba(var(--text-dim-rgb),.55);font-size:9px}
+.ins-key{display:flex;gap:12px;flex-wrap:wrap;margin-top:9px;font-family:'JetBrains Mono',monospace;font-size:9.5px;color:rgba(var(--text-dim-rgb),.7)}
+.ins-key:empty{display:none}
+.ins-key i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.ins-key i.line{height:2px;border-radius:1px;vertical-align:2px}
+.ins-hint{height:196px;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:rgba(var(--text-dim-rgb),.55)}
+.ins-hint[hidden]{display:none}
+@media(max-width:760px){
+  .insights{padding:0 12px 28px}
+  .insights-head{margin:0 -12px 10px;padding:12px}
+}

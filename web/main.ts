@@ -4,6 +4,7 @@ import type { Engine } from './engine';
 import { VisualRenderer, type LayoutMode, type PaletteName } from './render';
 import { renderInspector, renderRail, focusRailFilter } from './panels';
 import { HomeView } from './home';
+import { InsightsView } from './insights';
 import { Palette } from './palette';
 import { html, raw } from './html';
 import { Transport, searchServer, putSettings } from './transport';
@@ -17,6 +18,7 @@ interface ViewSession { id: string; awv: AwvSession; eng: Engine; live: boolean;
 
 type Route =
   | { view: 'home' }
+  | { view: 'insights' }
   | { view: 'live' }
   | { view: 'session'; id: string }
   | { view: 'replay' };
@@ -24,6 +26,7 @@ type Route =
 export function mountApp(app: HTMLElement) {
 app.innerHTML = `
   <div id="homeRoot" class="home-root" hidden></div>
+  <div id="insightsRoot" class="insights-root" hidden></div>
   <div id="graphRoot" class="shell" hidden>
     <header class="topbar">
       <button id="homeBtn" class="ghost home-btn" aria-label="Back to sessions home" title="Sessions home (esc)">← Home</button>
@@ -58,6 +61,7 @@ app.innerHTML = `
   <div id="settingsModal" class="modal" hidden role="dialog" aria-modal="true" aria-label="Settings"></div>`;
 
 const homeRoot = document.getElementById('homeRoot')!;
+const insightsRoot = document.getElementById('insightsRoot')!;
 const graphRoot = document.getElementById('graphRoot')!;
 const canvas = document.getElementById('canvas') as HTMLCanvasElement;
 const renderer = new VisualRenderer(canvas);
@@ -95,6 +99,7 @@ let lastLiveKey = '';
 let dirty = new Set<string>();
 let rebuildTimer: number | null = null;
 let homeTimer: number | null = null;
+let insightsTimer: number | null = null;
 let panelsDirty = false;
 let panelsAt = 0;
 let showCompleted = false;
@@ -112,7 +117,11 @@ const homeView = new HomeView(homeRoot, {
   onImport: () => fileInput.click(),
   onSettings: () => settingsModal.toggle(),
   onCycleTheme: cycleTheme,
+  onOpenInsights: () => { location.hash = '#/insights'; },
   search: searchServer,
+});
+const insightsView = new InsightsView(insightsRoot, {
+  onBack: () => { location.hash = ''; },
 });
 const palette = new Palette(document.body, {
   onOpen: (id) => { location.hash = `#/s/${id}`; },
@@ -131,9 +140,9 @@ palette.bindCommands(() => [
 ]);
 const settingsModal = new SettingsModal(document.getElementById('settingsModal')!, (open) => setGraphInert(open || palette.isOpen));
 const transport = new Transport({
-  onOpen: () => { lastLiveKey = ''; subscribe(); updateChrome(); scheduleHome(0); },
+  onOpen: () => { lastLiveKey = ''; subscribe(); updateChrome(); scheduleHome(0); scheduleInsights(0); },
   onMessage: handle,
-  onDown: () => { updateChrome(); scheduleHome(); },
+  onDown: () => { updateChrome(); scheduleHome(); scheduleInsights(); },
 });
 
 renderer.onSelect = (id) => { selectedId = id; renderer.selectedId = id; renderPanels(); };
@@ -148,6 +157,7 @@ requestAnimationFrame(frame);
 
 function parseRoute(hash: string): Route {
   const h = hash.replace(/^#\/?/, '');
+  if (h === 'insights') return { view: 'insights' };
   if (h === 'live') return { view: 'live' };
   if (h === 'replay') return { view: 'replay' };
   const m = /^s\/(.+)$/.exec(h);
@@ -163,15 +173,17 @@ function applyRoute(r: Route, initial = false) {
   const prev = route;
   route = r;
   if (r.view === 'replay' && !imported) { location.hash = ''; return; }
-  const isGraph = r.view !== 'home';
-  homeRoot.hidden = isGraph;
+  const isGraph = r.view !== 'home' && r.view !== 'insights';
+  homeRoot.hidden = r.view !== 'home';
+  insightsRoot.hidden = r.view !== 'insights';
   graphRoot.hidden = !isGraph;
-  if (r.view === 'home') {
+  if (!isGraph) {
     active = null;
     imported = null;
     views.clear(); dirty.clear();
     lastLiveKey = '';
     subscribe();
+    if (r.view === 'insights') { scheduleInsights(0); return; }
     scheduleHome(0);
     if (matchMedia('(pointer:fine)').matches) requestAnimationFrame(() => homeView.focusSearch());
     return;
@@ -212,9 +224,11 @@ function handle(msg: ServerMessage) {
     }
     updateChrome(false);
     scheduleHome();
+    scheduleInsights();
   } else if (msg.type === 'stats') {
     for (const st of msg.stats) statsById.set(st.sessionId, st);
     scheduleHome();
+    scheduleInsights();
   } else if (msg.type === 'snapshot') {
     const sum = summaryOf(msg.sessionId);
     const startMs = sum?.startedAt || firstEventMs(msg.session) || Date.now();
@@ -280,6 +294,18 @@ function scheduleHome(delay = 200) {
   }, delay);
 }
 
+/** Same coalescing for the Insights trends page. */
+function scheduleInsights(delay = 200) {
+  if (route.view !== 'insights') return;
+  if (insightsTimer != null) return;
+  insightsTimer = window.setTimeout(() => {
+    insightsTimer = null;
+    if (route.view !== 'insights') return;
+    const pricingConfigured = !!serverSettings && Object.keys(serverSettings.pricing || {}).length > 0;
+    insightsView.update(sessions, statsById, { pricingConfigured, connected: transport.open });
+  }, delay);
+}
+
 function subscribe() {
   if (imported) return;
   const choice = graphChoice(route);
@@ -304,6 +330,7 @@ function applyServerSettings(s: Settings) {
   settingsModal.setSettings(s);
   if (maskChanged) { delete titleBtn.dataset.key; updateChrome(); }
   scheduleHome();
+  scheduleInsights();
 }
 let maskWas = false;
 
@@ -394,7 +421,7 @@ function frame(ts: number) {
     renderer.drawFrame(simT, dt);
     if ((panelsDirty || playing || (livePinned && active.live)) && ts - panelsAt > 200) { panelsAt = ts; panelsDirty = false; renderPanels(); }
   }
-  if (route.view !== 'home') updateChrome(false);
+  if (route.view !== 'home' && route.view !== 'insights') updateChrome(false);
 }
 
 function renderPanels() {
@@ -474,6 +501,7 @@ function updateEmptyState() {
 function setGraphInert(inert: boolean) {
   graphRoot.toggleAttribute('inert', inert);
   homeRoot.toggleAttribute('inert', inert);
+  insightsRoot.toggleAttribute('inert', inert);
 }
 
 // ---------- popover ----------
@@ -598,6 +626,10 @@ window.addEventListener('keydown', e => {
   if (palette.isOpen) return;
   if (route.view === 'home') {
     if (e.key === '/') { e.preventDefault(); homeView.focusSearch(); }
+    return;
+  }
+  if (route.view === 'insights') {
+    if (e.key === 'Escape') { e.preventDefault(); location.hash = ''; }
     return;
   }
   if (e.key === 'Escape') { e.preventDefault(); location.hash = ''; return; }
