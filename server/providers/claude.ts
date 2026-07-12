@@ -128,18 +128,24 @@ export class ClaudeProjectWatcher implements SessionProvider {
         const id = `${project}/${sessionId}`;
         const state = this.store.upsertSession({ id, source: 'claude', project, sessionId, rootFile, sessionDir, lastActive: st.mtimeMs });
         const live = Date.now() - st.mtimeMs < this.livenessMs;
-        if (live || this.store.hasExplicitInterest(state)) {
-          await this.processSession(state);
-        } else {
-          if (!state.peeked) await this.peekSession(state, st.size);
-          if (state.loaded) this.releaseSessionWatches(state);
-          state.live = false;
-          const rootStamp = `${Math.round(st.mtimeMs)}:${st.size}`;
-          if (this.statsCache && !state.loaded && !state.statsQueued && state.statsRootStamp !== rootStamp) {
-            state.statsQueued = true;
-            state.statsRootStamp = rootStamp;
-            this.statsQueue.push(state);
+        try {
+          if (live || this.store.hasExplicitInterest(state)) {
+            await this.processSession(state);
+          } else {
+            if (!state.peeked) await this.peekSession(state, st.size);
+            if (state.loaded) this.releaseSessionWatches(state);
+            state.live = false;
+            const rootStamp = `${Math.round(st.mtimeMs)}:${st.size}`;
+            if (this.statsCache && !state.loaded && !state.statsQueued && state.statsRootStamp !== rootStamp) {
+              state.statsQueued = true;
+              state.statsRootStamp = rootStamp;
+              this.statsQueue.push(state);
+            }
           }
+        } catch (err) {
+          // One unreadable session (EACCES, deleted mid-scan) must not stall
+          // every other session in the scan.
+          console.error(`[claude] failed to read ${rootFile}; skipping this poll`, err);
         }
       }
     }
@@ -248,12 +254,25 @@ export class ClaudeProjectWatcher implements SessionProvider {
   }
 
   private async doProcess(state: SessionState) {
-    const initial = !state.loaded;
-    if (initial) state.loading = true;
-    const sources = await this.discoverSources(state);
-    for (const fs of sources) await this.readNewLines(state, fs);
-    if (initial) this.store.finishLoad(state);
+    if (!state.loaded) state.loading = true;
+    let wasReset = false;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const sources = await this.discoverSources(state);
+      let resetNeeded = false;
+      for (const fs of sources) {
+        if (await this.readNewLines(state, fs)) { resetNeeded = true; break; }
+      }
+      if (resetNeeded && attempt === 0) {
+        // A source file shrank (rewritten in place): derived events are stale.
+        wasReset = true;
+        this.store.resetSession(state);
+        continue;
+      }
+      break;
+    }
+    if (!state.loaded) this.store.finishLoad(state);
     state.live = Date.now() - state.lastActive < this.livenessMs;
+    if (wasReset) this.store.pushSnapshot(state);
   }
 
   /** Read a bounded head+tail slice to learn cwd/title/start time without parsing the whole transcript. */
@@ -340,17 +359,20 @@ export class ClaudeProjectWatcher implements SessionProvider {
     return meta;
   }
 
-  private async readNewLines(state: SessionState, file: FileSource) {
+  /** Returns true when the file shrank (rewrite) and the session needs a full reset. */
+  private async readNewLines(state: SessionState, file: FileSource): Promise<boolean> {
     const normalizer = this.normalizerOf(state);
     const agents = [] as any[];
     const events = [] as any[];
     const journal = file.source.kind === 'workflow-journal';
-    await tailLines(state.files, file.path, (line) => {
+    const { reset } = await tailLines(state.files, file.path, (line) => {
       const batch = journal ? normalizer.ingestJournal(line, file.source) : normalizer.normalizeLine(line, file.source);
       agents.push(...batch.agents);
       events.push(...batch.events);
     });
+    if (reset) return true;
     this.store.merge(state, agents, events);
+    return false;
   }
 }
 

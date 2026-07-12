@@ -124,7 +124,10 @@ export class OpencodeProvider implements SessionProvider {
         makeNormalizer: () => new OpencodeNormalizer({ sessionId: rootId }),
       });
       const normalizer = state.normalizer as OpencodeNormalizer;
-      normalizer.applySessionRow(rowData(row), true);
+      const agents: AwvAgent[] = [];
+      const events: AwvEvent[] = [];
+      normalizer.applySessionRow(rowData(row), true, agents, events);
+      if (agents.length || events.length) this.store.merge(state, agents, events);
       state.cwd = state.cwd || normalizer.cwd;
       state.peeked = true;
       const live = Date.now() - row.time_updated < this.livenessMs;
@@ -202,6 +205,7 @@ export class OpencodeProvider implements SessionProvider {
     return this.dbPathCache || join(this.dataDir, 'opencode.db');
   }
 
+  private openFailed = false;
   private open(): OpencodeDb | null {
     if (this.db) return this.db;
     const path = findOpencodeDb(this.dataDir);
@@ -209,9 +213,17 @@ export class OpencodeProvider implements SessionProvider {
     try {
       this.db = openOpencodeDb(path);
       this.dbPathCache = path;
+      this.openFailed = false;
       return this.db;
     } catch (err) {
-      console.error('[opencode] failed to open database; will retry', err);
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code === 'ERR_UNKNOWN_BUILTIN_MODULE') {
+        console.error('[opencode] node:sqlite is unavailable on this Node version (needs Node ≥ 22.13); disabling the opencode provider');
+        this.disabled = true;
+      } else if (!this.openFailed) {
+        console.error('[opencode] failed to open database; will retry quietly', err);
+      }
+      this.openFailed = true;
       return null;
     }
   }

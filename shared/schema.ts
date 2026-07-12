@@ -1,6 +1,6 @@
 export type AgentColor = 'gold' | 'cyan' | 'purple' | 'pink' | 'green' | 'red' | 'slate' | string;
 
-export type SessionSource = 'claude' | 'codex' | 'opencode' | 'copilot';
+export type SessionSource = 'claude' | 'codex' | 'opencode' | 'copilot' | 'pi';
 
 export interface AgentToolStats {
   read?: number;

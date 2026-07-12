@@ -1,7 +1,7 @@
 {
   "name": "orbservatory",
-  "version": "0.1.1",
-  "description": "Visualise Claude Code, Codex, opencode, and GitHub Copilot sessions as a live animated agent graph",
+  "version": "0.1.2",
+  "description": "Visualise Claude Code, Codex, opencode, GitHub Copilot, and pi sessions as a live animated agent graph",
   "license": "MIT",
   "author": "Brendan Shields <hello@brendanshields.dev>",
   "repository": {
@@ -13,12 +13,13 @@
     "codex",
     "opencode",
     "copilot",
+    "pi",
     "visualization",
     "agents",
     "transcript"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=20.9"
   },
   "type": "module",
   "bin": {
@@ -34,7 +35,13 @@
     "next.config.ts",
     ".next",
     "!.next/dev",
-    "!.next/cache"
+    "!.next/cache",
+    "!.next/trace",
+    "!.next/trace-build",
+    "!.next/diagnostics",
+    "!.next/types",
+    "!.next/turbopack",
+    "!.next/**/*.map"
   ],
   "scripts": {
     "dev": "tsx scripts/next-server.ts --dev",
@@ -46,7 +53,7 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "lint": "eslint",
-    "prepublishOnly": "next build"
+    "prepack": "next build && node scripts/scrub-build.mjs"
   },
   "dependencies": {
     "next": "16.2.10",

@@ -148,9 +148,10 @@ export class TranscriptNormalizer {
       const ts = Date.parse(rec.timestamp);
       if (Number.isFinite(ts)) this.startedAt = ts;
     }
-    if (type === 'ai-title') this.setTitle(String(rec.aiTitle ?? rec.title ?? ''), 3);
+    if (type === 'custom-title') this.setTitle(String(rec.customTitle ?? ''), 4);
+    else if (type === 'ai-title') this.setTitle(String(rec.aiTitle ?? rec.title ?? ''), 3);
     else if (type === 'summary') this.setTitle(String(rec.summary ?? ''), 2);
-    else if (type === 'user' && !rec.isMeta) {
+    else if (type === 'user' && !rec.isMeta && !rec.isCompactSummary) {
       const blocks = contentBlocks(rec.message?.content ?? rec.content);
       if (!blocks.some((b) => b && typeof b === 'object' && b.type === 'tool_result')) {
         const text = textFromContent(rec.message?.content ?? rec.content);
@@ -192,6 +193,21 @@ export class TranscriptNormalizer {
     const type = String(rec.type || '');
     if (type === 'summary') return { agents: [], events: [], titleChanged: this.setTitle(String(rec.summary ?? ''), 2) };
     if (type === 'ai-title') return { agents: [], events: [], titleChanged: this.setTitle(String(rec.aiTitle ?? rec.title ?? ''), 3) };
+    if (type === 'custom-title') return { agents: [], events: [], titleChanged: this.setTitle(String(rec.customTitle ?? ''), 4) };
+    if (type === 'system' && rec.subtype === 'compact_boundary') {
+      this.dirty.clear();
+      const { ts, t } = this.clock(rec);
+      const agentId = this.ensureSourceAgent(source, rec, t, new Date(ts).toISOString());
+      const agents: AwvAgent[] = [];
+      const events: AwvEvent[] = [];
+      this.flushSpawns(agents, events);
+      const trigger = rec.compactMetadata?.trigger;
+      const ev: Extract<AwvEvent, { type: 'compact' }> = { t, type: 'compact', agent: agentId, to: 0, label: 'context compacted' };
+      if (trigger === 'auto' || trigger === 'manual') ev.trigger = trigger;
+      events.push(stamp(ev, ts));
+      this.lastTokens.set(agentId, 0);
+      return this.finish(agents, events);
+    }
     if (HOUSEKEEPING_TYPES.has(type)) return { agents: [], events: [] };
 
     if (rec.cwd && !this.cwd) {
@@ -213,7 +229,7 @@ export class TranscriptNormalizer {
         this.completeFromNotifications(rawText, t, ts, events);
         return this.finish(agents, events);
       }
-      if (rec.isMeta) return this.finish(agents, events);
+      if (rec.isMeta || rec.isCompactSummary) return this.finish(agents, events);
       const blocks = contentBlocks(rec.message?.content ?? rec.content);
       const toolResults = blocks.filter((b) => b && typeof b === 'object' && b.type === 'tool_result');
       if (toolResults.length) {
@@ -242,12 +258,16 @@ export class TranscriptNormalizer {
       } else {
         const text = textFromContent(rec.message?.content ?? rec.content);
         if (text && META_CONTENT.test(text)) return this.finish(agents, events);
-        const label = truncate(text, 120);
+        let label = truncate(text, 120);
         if (label) {
           this.setTitle(text, 1);
           this.nameWorkflowAgentFromPrompt(source, agentId, text);
-          if (source.kind === 'root') this.userTurns++;
           this.addSearchPart('prompt', text);
+        } else if (blocks.some((b) => b && typeof b === 'object' && b.type === 'image')) {
+          label = '🖼 image';
+        }
+        if (label) {
+          if (source.kind === 'root') this.userTurns++;
           maybePush({ t, type: 'message', to: agentId, label });
         }
       }
@@ -255,6 +275,14 @@ export class TranscriptNormalizer {
     }
 
     if (rec.type === 'assistant') {
+      if (rec.isApiErrorMessage) {
+        // Retry/error records carry synthetic models and all-zero usage — they
+        // must not touch the token curve (a zero total reads as a huge drop
+        // and fabricates a compact event). Surface the error text instead.
+        const text = textFromContent(rec.message?.content ?? rec.content);
+        maybePush({ t, type: 'error', agent: agentId, label: truncate(text || 'API error', 96) });
+        return this.finish(agents, events);
+      }
       const model = rec.message?.model;
       if (typeof model === 'string' && model && !model.startsWith('<')) {
         const agent = this.agents.get(agentId);
@@ -351,6 +379,7 @@ export class TranscriptNormalizer {
     const n = (v: any) => { const x = Number(v); return Number.isFinite(x) ? x : 0; };
     const input = n(usage.input_tokens), output = n(usage.output_tokens);
     const cacheRead = n(usage.cache_read_input_tokens), cacheCreation = n(usage.cache_creation_input_tokens);
+    if (input + output + cacheRead + cacheCreation === 0) return;
     tot.input += input; tot.output += output; tot.cacheRead += cacheRead; tot.cacheCreation += cacheCreation;
     tot.total += input + output + cacheRead + cacheCreation;
   }
@@ -365,7 +394,10 @@ export class TranscriptNormalizer {
    */
   private clock(rec: any): { ts: number; t: number } {
     const real = realTimestampOf(rec);
-    if (real) { this.lastTs = real; if (!this.startedAt) this.startedAt = real; }
+    // A real timestamp earlier than the current startedAt wins: the tail-slice
+    // peek can seed startedAt from end-of-session records, and keeping that
+    // value would clamp the whole replay to t=0.
+    if (real) { this.lastTs = real; if (!this.startedAt || real < this.startedAt) this.startedAt = real; }
     const ts = real ?? (this.lastTs || Date.now());
     return { ts, t: this.startedAt ? Math.max(0, ts - this.startedAt) : 0 };
   }
@@ -646,7 +678,9 @@ function usageTokens(usage: any): number | null {
     const n = Number(usage[k] ?? 0);
     if (Number.isFinite(n)) { total += n; seen = true; }
   }
-  return seen ? total : null;
+  // All-zero usage comes from synthetic/error records; treating it as a real
+  // reading would register as a full-context drop (phantom compact).
+  return seen && total > 0 ? total : null;
 }
 
 /** Paths render relative to the session cwd (foreign paths collapse to their basename) so labels and exports never carry absolute paths. */

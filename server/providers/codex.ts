@@ -122,11 +122,15 @@ export class CodexProvider implements SessionProvider {
       });
       this.sessionFiles.set(id, g.files);
       const live = Date.now() - g.lastActive < this.livenessMs;
-      if (live || this.store.hasExplicitInterest(state)) {
-        await this.processSession(state);
-      } else {
-        if (!state.peeked) await this.peekSession(state, g.rootPath, g.files.find((f) => f.path === g.rootPath)?.size ?? 0);
-        state.live = false;
+      try {
+        if (live || this.store.hasExplicitInterest(state)) {
+          await this.processSession(state);
+        } else {
+          if (!state.peeked) await this.peekSession(state, g.rootPath, g.files.find((f) => f.path === g.rootPath)?.size ?? 0);
+          state.live = false;
+        }
+      } catch (err) {
+        console.error(`[codex] failed to read session ${sid}; skipping this poll`, err);
       }
     }
     this.store.broadcastSessions();
@@ -140,26 +144,38 @@ export class CodexProvider implements SessionProvider {
   }
 
   private async doProcess(state: SessionState) {
-    const initial = !state.loaded;
-    if (initial) state.loading = true;
-    const normalizer = state.normalizer as CodexNormalizer;
+    if (!state.loaded) state.loading = true;
     const files = this.sessionFiles.get(state.id) ?? [];
-    for (const file of files) {
-      const src: CodexLineSource = file.head.subagent
-        ? { kind: 'subagent', threadId: file.head.threadId, name: file.head.subagentName }
-        : { kind: 'root', threadId: file.head.threadId };
-      const agents = [] as any[];
-      const events = [] as any[];
-      await tailLines(state.files, file.path, (line) => {
-        const batch = normalizer.normalizeLine(line, src);
-        agents.push(...batch.agents);
-        events.push(...batch.events);
-      });
-      this.store.merge(state, agents, events);
+    let wasReset = false;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const normalizer = state.normalizer as CodexNormalizer;
+      let resetNeeded = false;
+      for (const file of files) {
+        const src: CodexLineSource = file.head.subagent
+          ? { kind: 'subagent', threadId: file.head.threadId, name: file.head.subagentName }
+          : { kind: 'root', threadId: file.head.threadId };
+        const agents = [] as any[];
+        const events = [] as any[];
+        const { reset } = await tailLines(state.files, file.path, (line) => {
+          const batch = normalizer.normalizeLine(line, src);
+          agents.push(...batch.agents);
+          events.push(...batch.events);
+        });
+        if (reset) { resetNeeded = true; break; }
+        this.store.merge(state, agents, events);
+      }
+      if (resetNeeded && attempt === 0) {
+        // Codex rewrites rollout files in place on compaction.
+        wasReset = true;
+        this.store.resetSession(state, () => new CodexNormalizer({ threadId: state.sessionId }));
+        continue;
+      }
+      break;
     }
-    state.cwd = state.cwd || normalizer.cwd;
-    if (initial) this.store.finishLoad(state);
+    state.cwd = state.cwd || (state.normalizer as CodexNormalizer).cwd;
+    if (!state.loaded) this.store.finishLoad(state);
     state.live = Date.now() - state.lastActive < this.livenessMs;
+    if (wasReset) this.store.pushSnapshot(state);
   }
 
   private async peekSession(state: SessionState, rootPath: string, size: number) {
@@ -185,10 +201,18 @@ export class CodexProvider implements SessionProvider {
     if (cached) return cached;
     const text = await readFileSlice(path, 0, Math.min(size, HEAD_PROBE_BYTES)).catch(() => '');
     const nl = text.indexOf('\n');
-    if (nl < 0) return null;
+    const fallbackId = UUIDISH.exec(basename(path))?.[1] || basename(path).replace(/\.jsonl$/, '');
+    if (nl < 0) {
+      // First line still partial: retry next poll — unless it already exceeds
+      // the probe window, in which case give up on the meta and fall back to
+      // the filename id rather than re-reading 128KB every poll forever.
+      if (size <= HEAD_PROBE_BYTES) return null;
+      const head: RolloutHead = { threadId: fallbackId, subagent: false };
+      this.heads.set(path, head);
+      return head;
+    }
     const first = safeJson(text.slice(0, nl));
     const payload = first?.type === 'session_meta' ? first.payload : null;
-    const fallbackId = UUIDISH.exec(basename(path))?.[1] || basename(path).replace(/\.jsonl$/, '');
     const head: RolloutHead = payload && typeof payload === 'object'
       ? {
           threadId: String(payload.id || payload.session_id || fallbackId),
@@ -206,7 +230,7 @@ function subagentName(source: any): string | undefined {
   if (!source) return undefined;
   const sub = source.subagent;
   if (typeof sub === 'string') return sub;
-  if (sub && typeof sub === 'object') return strOrUndef(sub.name ?? sub.type);
+  if (sub && typeof sub === 'object') return strOrUndef(sub.name ?? sub.type ?? sub.other);
   return undefined;
 }
 

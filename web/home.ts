@@ -59,7 +59,7 @@ export class HomeView {
     root.innerHTML = `
       <div class="home" role="main">
         <div class="home-head">
-          <div class="brand"><i></i><div><b>ORBSERVATORY</b><span>CLAUDE CODE LIVE VISUALISER</span></div></div>
+          <div class="brand"><i></i><div><b>ORBSERVATORY</b></div></div>
           <input id="homeQ" class="home-q" type="search" placeholder="⌕ Search sessions… (title, project, skills, tools, full text) (/)" aria-label="Search sessions" autocomplete="off" spellcheck="false">
           <button id="homeImportBtn" class="ghost" title="Import an exported AWV session">Import session</button>
           <div class="icon-cluster">
@@ -215,7 +215,7 @@ export class HomeView {
     };
     const changed = this.setHtml(this.els.facets, html`${[
       sel('project', 'project', this.filter.project, f.projects),
-      sel('source', 'source', this.filter.source, ['claude', 'codex', 'opencode', 'copilot']),
+      sel('source', 'source', this.filter.source, ['claude', 'codex', 'opencode', 'copilot', 'pi']),
       sel('model', 'model', this.filter.model, f.models),
       sel('tier', 'tier', this.filter.tier, ['simple', 'moderate', 'complex']),
       sel('skill', 'skill', this.filter.skill, f.skills),
@@ -321,7 +321,7 @@ export class HomeView {
 
   private renderList(visible: HomeRow[]) {
     if (!this.data.sessions.length) {
-      if (!this.setHtml(this.els.list, html`<div class="home-empty"><h2>${this.data.connected ? 'No sessions yet' : 'Connecting…'}</h2><p>${this.data.connected ? 'Start a coding agent (Claude Code, Codex, opencode, Copilot) in any project — sessions appear here automatically. Or import a replay.' : 'Reconnecting to the local transcript stream…'}</p>${this.data.connected ? raw('<button id="homeImportEmpty" class="ghost">Import a replay</button>') : ''}</div>`.s)) return;
+      if (!this.setHtml(this.els.list, html`<div class="home-empty"><h2>${this.data.connected ? 'No sessions yet' : 'Connecting…'}</h2><p>${this.data.connected ? 'Start a coding agent (Claude Code, Codex, opencode, Copilot, pi) in any project — sessions appear here automatically. Or import a replay.' : 'Reconnecting to the local transcript stream…'}</p>${this.data.connected ? raw('<button id="homeImportEmpty" class="ghost">Import a replay</button>') : ''}</div>`.s)) return;
       const b = this.els.list.querySelector<HTMLButtonElement>('#homeImportEmpty');
       if (b) b.onclick = () => this.cb.onImport();
       return;

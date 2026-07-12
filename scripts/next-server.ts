@@ -78,6 +78,15 @@ wss.on('connection', (ws) => {
   ws.on('close', () => runtime.removeSubscriber(sub));
 });
 
+server.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`orbservatory: port ${port} is already in use (another instance running?). Set PORT=<other port> and retry.`);
+  } else {
+    console.error('orbservatory: server failed to start', err);
+  }
+  process.exit(1);
+});
+
 server.listen(port, hostname, () => {
   const displayHost = hostname === '127.0.0.1' || hostname === '0.0.0.0' ? 'localhost' : hostname;
   const url = `http://${displayHost}:${port}`;

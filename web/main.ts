@@ -417,6 +417,7 @@ function sourceOfAgent(agentId: string): string | undefined {
 
 function updateChrome(render = true) {
   playBtn.textContent = playing ? '❚❚' : '▶';
+  playBtn.setAttribute('aria-label', playing ? 'Pause' : 'Play');
   liveBtn.hidden = !active?.live;
   liveBtn.classList.toggle('off', !livePinned || !active?.live);
   timeEl.textContent = active ? `${fmtT(simT)} / ${fmtT(active.eng.duration)}` : '0:00 / 0:00';
@@ -455,7 +456,7 @@ function updateEmptyState() {
   if (!show) return;
   const head = connected ? 'No live sessions' : transport.connecting ? 'Connecting…' : 'Disconnected';
   const sub = connected
-    ? 'Start a coding agent (Claude Code, Codex, opencode, Copilot) in any project, press ⌘K to pick a past session, or import a replay.'
+    ? 'Start a coding agent (Claude Code, Codex, opencode, Copilot, pi) in any project, press ⌘K to pick a past session, or import a replay.'
     : 'Reconnecting to the local transcript stream…';
   emptyEl.innerHTML = html`<div class="empty-card"><span class="empty-dot ${connected ? 'on' : ''}"></span><h2>${head}</h2><p>${sub}</p>${connected ? raw('<button id="emptyImport" class="amber">Import a replay</button>') : ''}</div>`.s;
   const b = document.getElementById('emptyImport');
@@ -499,16 +500,28 @@ function togglePopover(anchor: HTMLElement, items: PopItem[]) {
   el.style.bottom = `${window.innerHeight - r.top + 8}px`;
   if (r.left + r.right > window.innerWidth) el.style.right = `${Math.max(8, window.innerWidth - r.right)}px`;
   else el.style.left = `${r.left}px`;
+  const menuItems = [...el.querySelectorAll<HTMLButtonElement>('.pop-item')];
   const onDown = (e: PointerEvent) => { if (!el.contains(e.target as Node)) closePopover(); };
-  const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); closePopover(); } };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') { e.stopPropagation(); closePopover(); return; }
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    if (!menuItems.length) return;
+    e.preventDefault();
+    const cur = menuItems.indexOf(document.activeElement as HTMLButtonElement);
+    const next = e.key === 'ArrowDown' ? (cur + 1 + menuItems.length) % menuItems.length : (cur - 1 + menuItems.length) % menuItems.length;
+    menuItems[next].focus();
+  };
   document.addEventListener('pointerdown', onDown, true);
   document.addEventListener('keydown', onKey, true);
+  (menuItems.find(b => b.classList.contains('on')) ?? menuItems[0])?.focus();
   popoverAnchor = anchor;
   popoverClose = () => {
+    const hadFocus = el.contains(document.activeElement);
     el.remove();
     document.removeEventListener('pointerdown', onDown, true);
     document.removeEventListener('keydown', onKey, true);
     popoverClose = null; popoverAnchor = null;
+    if (hadFocus) anchor.focus();
   };
 }
 

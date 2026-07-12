@@ -26,6 +26,9 @@ export class OpencodeNormalizer implements SessionNormalizer {
   private lastAssistant = new Map<string, { t: number; ts: number }>();
   private msgCursors = new Map<string, string>();
   private partCursors = new Map<string, string>();
+  /** Row ids seen but still pending (no terminal state): the cursor must not advance past them. */
+  private msgPending = new Map<string, Set<string>>();
+  private partPending = new Map<string, Set<string>>();
   private completedRoot = false;
   private hasTitle = false;
   private contextLimits: Record<string, number> = {};
@@ -107,7 +110,12 @@ export class OpencodeNormalizer implements SessionNormalizer {
         if (model) this.setModel(agentId, model, agents);
       }
     }
-    if (terminal) this.advance(this.msgCursors, sessId, rowId);
+    if (terminal) {
+      this.msgPending.get(sessId)?.delete(rowId);
+      this.advance(this.msgCursors, sessId, rowId, this.msgPending.get(sessId));
+    } else {
+      this.markPending(this.msgPending, sessId, rowId);
+    }
   }
 
   applyPart(sessId: string, rowId: string, data: any, agents: AwvAgent[], events: AwvEvent[]) {
@@ -127,7 +135,7 @@ export class OpencodeNormalizer implements SessionNormalizer {
           events.push(this.stamp({ t: this.tOf(ts), type: 'message', to: agentId, label: truncate(text, 120) }, ts));
         }
       }
-      this.advance(this.partCursors, sessId, rowId);
+      this.advance(this.partCursors, sessId, rowId, this.partPending.get(sessId));
       return;
     }
 
@@ -162,7 +170,10 @@ export class OpencodeNormalizer implements SessionNormalizer {
             events.push(this.stamp({ t: this.tOf(ended), type: 'complete', agent: childAgent, label: status }, ended));
           }
         }
-        this.advance(this.partCursors, sessId, rowId);
+        this.partPending.get(sessId)?.delete(rowId);
+        this.advance(this.partCursors, sessId, rowId, this.partPending.get(sessId));
+      } else {
+        this.markPending(this.partPending, sessId, rowId);
       }
       return;
     }
@@ -176,11 +187,11 @@ export class OpencodeNormalizer implements SessionNormalizer {
           this.pushTokenDelta(agentId, total, ts, events, false);
         }
       }
-      this.advance(this.partCursors, sessId, rowId);
+      this.advance(this.partCursors, sessId, rowId, this.partPending.get(sessId));
       return;
     }
 
-    this.advance(this.partCursors, sessId, rowId);
+    this.advance(this.partCursors, sessId, rowId, this.partPending.get(sessId));
   }
 
   /** No explicit session-end marker exists; when the liveness window closes, mark the last assistant turn complete. */
@@ -260,7 +271,22 @@ export class OpencodeNormalizer implements SessionNormalizer {
     if (!agents.some((x) => x.id === agentId)) agents.push(a);
   }
 
-  private advance(cursors: Map<string, string>, sessId: string, rowId: string) {
+  private markPending(pending: Map<string, Set<string>>, sessId: string, rowId: string) {
+    let set = pending.get(sessId);
+    if (!set) { set = new Set(); pending.set(sessId, set); }
+    set.add(rowId);
+  }
+
+  /**
+   * Move the incremental cursor forward — but never past a row that is still
+   * pending (running tool, incomplete assistant turn). The provider queries
+   * `id > cursor`, so skipping a pending row would lose its completion forever;
+   * holding the cursor re-reads it each poll and the emitted* sets dedupe.
+   */
+  private advance(cursors: Map<string, string>, sessId: string, rowId: string, pending?: Set<string>) {
+    if (pending) {
+      for (const p of pending) if (p <= rowId) return;
+    }
     const cur = cursors.get(sessId) ?? '';
     if (rowId > cur) cursors.set(sessId, rowId);
   }

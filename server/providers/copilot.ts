@@ -27,7 +27,8 @@ export class CopilotProvider implements SessionProvider {
   private livenessMs: number;
   private timer: ReturnType<typeof setInterval> | null = null;
   private busy = false;
-  private broken = new Set<string>();
+  /** Session id → mtime at parse failure; a changed mtime clears the skip so appends get retried. */
+  private broken = new Map<string, number>();
 
   constructor(private store: SessionStore, opts?: CopilotOptions) {
     this.root = opts?.root || defaultCopilotRoot();
@@ -82,11 +83,15 @@ export class CopilotProvider implements SessionProvider {
       if (!ent.isDirectory()) continue;
       const sessionId = ent.name;
       const id = `copilot:${sessionId}`;
-      if (this.broken.has(id)) continue;
       const sessionDir = join(this.root, sessionId);
       const rootFile = join(sessionDir, 'events.jsonl');
       const st = await stat(rootFile).catch(() => null);
       if (!st) continue;
+      const brokenAt = this.broken.get(id);
+      if (brokenAt != null) {
+        if (brokenAt === st.mtimeMs) continue;
+        this.broken.delete(id);
+      }
       const state = this.store.upsertSession({
         id,
         source: 'copilot',
@@ -106,9 +111,9 @@ export class CopilotProvider implements SessionProvider {
           state.live = false;
         }
       } catch (err) {
-        // Whole-file failure skips this session without affecting the rest.
-        this.broken.add(id);
-        console.error(`[copilot] failed to parse ${rootFile}; skipping session`, err);
+        // Whole-file failure skips this session (retried when the file changes) without affecting the rest.
+        this.broken.set(id, st.mtimeMs);
+        console.error(`[copilot] failed to parse ${rootFile}; skipping session until it changes`, err);
       }
     }
     this.store.broadcastSessions();
@@ -122,20 +127,29 @@ export class CopilotProvider implements SessionProvider {
   }
 
   private async doProcess(state: SessionState) {
-    const initial = !state.loaded;
-    if (initial) state.loading = true;
-    const normalizer = state.normalizer as CopilotNormalizer;
-    const agents = [] as any[];
-    const events = [] as any[];
-    await tailLines(state.files, state.rootFile, (line) => {
-      const batch = normalizer.normalizeLine(line);
-      agents.push(...batch.agents);
-      events.push(...batch.events);
-    });
-    this.store.merge(state, agents, events);
-    state.cwd = state.cwd || normalizer.cwd;
-    if (initial) this.store.finishLoad(state);
+    if (!state.loaded) state.loading = true;
+    let wasReset = false;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const normalizer = state.normalizer as CopilotNormalizer;
+      const agents = [] as any[];
+      const events = [] as any[];
+      const { reset } = await tailLines(state.files, state.rootFile, (line) => {
+        const batch = normalizer.normalizeLine(line);
+        agents.push(...batch.agents);
+        events.push(...batch.events);
+      });
+      if (reset && attempt === 0) {
+        wasReset = true;
+        this.store.resetSession(state, () => new CopilotNormalizer({ sessionId: state.sessionId }));
+        continue;
+      }
+      this.store.merge(state, agents, events);
+      break;
+    }
+    state.cwd = state.cwd || (state.normalizer as CopilotNormalizer).cwd;
+    if (!state.loaded) this.store.finishLoad(state);
     state.live = Date.now() - state.lastActive < this.livenessMs;
+    if (wasReset) this.store.pushSnapshot(state);
   }
 
   private async peekSession(state: SessionState, size: number) {
