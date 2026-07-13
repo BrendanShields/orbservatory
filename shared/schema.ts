@@ -80,7 +80,6 @@ export interface Settings {
   theme: 'system' | 'light' | 'dark';
   canvasStyle: 'match' | 'dark';
   maskProjects: boolean;
-  showGrid: boolean;
   showSubagentNames: boolean;
   showOrchestratorName: boolean;
   livenessMs: number;

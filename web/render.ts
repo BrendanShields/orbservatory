@@ -7,28 +7,28 @@ export type LayoutMode = 'organic' | 'radial' | 'fixed';
 export type PaletteName = 'Deep Teal' | 'Obsidian' | 'Ink Blue' | 'Void Violet' | 'Carbon';
 export type CanvasMode = 'dark' | 'light';
 
-interface PaletteSkin { stops: string[]; grid: string; vign: string }
+interface PaletteSkin { stops: string[]; vign: string }
 
 export const PALETTES: Record<PaletteName, Record<CanvasMode, PaletteSkin>> = {
   'Deep Teal': {
-    dark: { stops: ['#0a2029', '#06141a', '#040d12'], grid: 'rgba(140,200,220,.055)', vign: 'rgba(3,10,14,.5)' },
-    light: { stops: ['#f4f9fa', '#e9f2f4', '#dce8ec'], grid: 'rgba(40,90,110,.09)', vign: 'rgba(176,196,204,.35)' },
+    dark: { stops: ['#0a2029', '#06141a', '#040d12'], vign: 'rgba(3,10,14,.5)' },
+    light: { stops: ['#f4f9fa', '#e9f2f4', '#dce8ec'], vign: 'rgba(176,196,204,.35)' },
   },
   'Obsidian': {
-    dark: { stops: ['#151518', '#0a0a0d', '#000000'], grid: 'rgba(205,210,220,.05)', vign: 'rgba(0,0,0,.62)' },
-    light: { stops: ['#f7f7f8', '#ededf0', '#dfdfe4'], grid: 'rgba(70,70,85,.08)', vign: 'rgba(185,185,195,.38)' },
+    dark: { stops: ['#151518', '#0a0a0d', '#000000'], vign: 'rgba(0,0,0,.62)' },
+    light: { stops: ['#f7f7f8', '#ededf0', '#dfdfe4'], vign: 'rgba(185,185,195,.38)' },
   },
   'Ink Blue': {
-    dark: { stops: ['#0a1626', '#050c16', '#01040a'], grid: 'rgba(150,180,225,.055)', vign: 'rgba(1,4,10,.58)' },
-    light: { stops: ['#f3f7fc', '#e7eef7', '#d8e3f0'], grid: 'rgba(55,90,140,.09)', vign: 'rgba(172,190,212,.36)' },
+    dark: { stops: ['#0a1626', '#050c16', '#01040a'], vign: 'rgba(1,4,10,.58)' },
+    light: { stops: ['#f3f7fc', '#e7eef7', '#d8e3f0'], vign: 'rgba(172,190,212,.36)' },
   },
   'Void Violet': {
-    dark: { stops: ['#151019', '#0b0710', '#020104'], grid: 'rgba(195,170,225,.05)', vign: 'rgba(2,1,5,.6)' },
-    light: { stops: ['#f8f5fb', '#efe9f6', '#e2d9ee'], grid: 'rgba(100,70,140,.08)', vign: 'rgba(190,178,205,.36)' },
+    dark: { stops: ['#151019', '#0b0710', '#020104'], vign: 'rgba(2,1,5,.6)' },
+    light: { stops: ['#f8f5fb', '#efe9f6', '#e2d9ee'], vign: 'rgba(190,178,205,.36)' },
   },
   'Carbon': {
-    dark: { stops: ['#1b1b1e', '#101012', '#050506'], grid: 'rgba(212,212,218,.05)', vign: 'rgba(0,0,0,.56)' },
-    light: { stops: ['#f6f6f7', '#ebebed', '#dcdce0'], grid: 'rgba(75,75,82,.08)', vign: 'rgba(182,182,188,.38)' },
+    dark: { stops: ['#1b1b1e', '#101012', '#050506'], vign: 'rgba(0,0,0,.56)' },
+    light: { stops: ['#f6f6f7', '#ebebed', '#dcdce0'], vign: 'rgba(182,182,188,.38)' },
   },
 };
 
@@ -104,7 +104,6 @@ export class VisualRenderer {
   canvasStyle: 'match' | 'dark' = 'match';
   glow = 1;
   edgeStyle: 'beams' | 'wires' = 'beams';
-  showGrid = false;
   showSubagentNames = true;
   showOrchestratorName = true;
   liveNow?: number;
@@ -511,7 +510,6 @@ export class VisualRenderer {
     const bg = x.createRadialGradient(w / 2, h * .28, 40, w / 2, h * .28, Math.max(w, h));
     bg.addColorStop(0, pal.stops[0]); bg.addColorStop(.58, pal.stops[1]); bg.addColorStop(1, pal.stops[2]);
     x.fillStyle = bg; x.fillRect(0, 0, w, h);
-    if (this.showGrid) this.drawGrid(x, w, h, pal.grid);
     const cam = this.cam, s = cam.s;
     x.save(); x.translate(w / 2, h / 2); x.scale(s, s); x.translate(-cam.x, -cam.y);
     this.drawWorld(t, x);
@@ -524,14 +522,6 @@ export class VisualRenderer {
   /** Effective canvas mode: 'dark' canvasStyle pins the video-editor stage regardless of app theme. */
   mode(): CanvasMode { return this.canvasStyle === 'dark' ? 'dark' : this.resolvedTheme; }
   private theme(): CanvasTheme { return CANVAS_THEMES[this.mode()]; }
-
-  private drawGrid(x: CanvasRenderingContext2D, w: number, h: number, color: string) {
-    x.save(); x.strokeStyle = color; x.lineWidth = 1;
-    const step = 42 * this.cam.s; const ox = ((-this.cam.x * this.cam.s + w / 2) % step + step) % step; const oy = ((-this.cam.y * this.cam.s + h / 2) % step + step) % step;
-    for (let px = ox; px < w; px += step) { x.beginPath(); x.moveTo(px, 0); x.lineTo(px, h); x.stroke(); }
-    for (let py = oy; py < h; py += step) { x.beginPath(); x.moveTo(0, py); x.lineTo(w, py); x.stroke(); }
-    x.restore();
-  }
 
   /** First index in eng.evs with t >= target (events are sorted by t). */
   private evLowerBound(target: number): number {
@@ -559,17 +549,32 @@ export class VisualRenderer {
       const pathTo = (frac: number) => { x.beginPath(); x.moveTo(p.x, p.y); if (frac >= .999) x.quadraticCurveTo(c.cx, c.cy, n.x, n.y); else for (let k=1;k<=16;k++) { const q=this.qPt(p.x,p.y,c.cx,c.cy,n.x,n.y,(k/16)*frac); x.lineTo(q.x,q.y); } };
       if (this.edgeStyle === 'beams') { x.strokeStyle = `rgba(${r2},${g2},${b2},${(recent[n.id] != null ? .1 : .045) * this.glow * fade})`; x.lineWidth = 6; pathTo(end); x.stroke(); }
       x.strokeStyle = gr; x.lineWidth = 1.1; pathTo(end); x.stroke();
-      // Living energy: light pulses stream parent→child along active/recent edges.
+      // Data transfer: crisp comet particles stream parent→child along active/recent edges.
       const cs = statusAt(n.a, T, this.liveNow);
       if (!this.reduceMotion && (cs === 'active' || recent[n.id] != null) && fade > 0) {
         const spr = this.glowSprite(nc), N = 3, speed = 0.5, dark = this.mode() === 'dark';
+        const amp = (cs === 'active' ? 1 : .5) * fade;
         if (dark) x.globalCompositeOperation = 'lighter';
         for (let k = 0; k < N; k++) {
           const fr = (((T / 1000) * speed + k / N) % 1) * end;
+          const env = Math.sin(Math.PI * fr) * amp;
+          if (env <= .02) continue;
+          x.fillStyle = `rgb(${r2},${g2},${b2})`;
+          for (let j = 3; j >= 1; j--) {
+            const tf = fr - j * .022; if (tf <= 0) continue;
+            const q = this.qPt(p.x, p.y, c.cx, c.cy, n.x, n.y, tf);
+            x.globalAlpha = env * .35 * (1 - j / 4);
+            x.beginPath(); x.arc(q.x, q.y, 1.6 - j * .3, 0, 7); x.fill();
+          }
           const q = this.qPt(p.x, p.y, c.cx, c.cy, n.x, n.y, fr);
-          const sz = (6.5 + 2.5 * Math.sin(T / 300 + k * 2)) * this.glow;
-          x.globalAlpha = (cs === 'active' ? .55 : .28) * fade * Math.sin(Math.PI * fr);
-          x.drawImage(spr, q.x - sz / 2, q.y - sz / 2, sz, sz);
+          const sz = 9 * this.glow;
+          if (sz > 1) { x.globalAlpha = env * .6; x.drawImage(spr, q.x - sz / 2, q.y - sz / 2, sz, sz); }
+          x.globalAlpha = env;
+          x.beginPath(); x.arc(q.x, q.y, 1.8, 0, 7); x.fill();
+          x.globalAlpha = env * .9;
+          x.fillStyle = dark ? 'rgba(255,255,255,.9)' : `rgb(${Math.max(0, r2 - 60)},${Math.max(0, g2 - 60)},${Math.max(0, b2 - 60)})`;
+          x.beginPath(); x.arc(q.x, q.y, .9, 0, 7); x.fill();
+          x.fillStyle = `rgb(${r2},${g2},${b2})`;
         }
         x.globalAlpha = 1;
         if (dark) x.globalCompositeOperation = 'source-over';

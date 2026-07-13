@@ -329,7 +329,6 @@ function applyServerSettings(s: Settings) {
   renderer.layout = s.layout as LayoutMode;
   theme.setSetting(s.theme || 'system');
   renderer.canvasStyle = s.canvasStyle || 'match';
-  renderer.showGrid = !!s.showGrid;
   renderer.showSubagentNames = s.showSubagentNames !== false;
   renderer.showOrchestratorName = s.showOrchestratorName !== false;
   const maskChanged = maskWas !== s.maskProjects;
