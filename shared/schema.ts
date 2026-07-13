@@ -1,6 +1,6 @@
 export type AgentColor = 'gold' | 'cyan' | 'purple' | 'pink' | 'green' | 'red' | 'slate' | string;
 
-export type SessionSource = 'claude' | 'codex' | 'opencode' | 'copilot' | 'pi';
+export type SessionSource = 'claude';
 
 export interface AgentToolStats {
   read?: number;
@@ -86,7 +86,6 @@ export interface Settings {
   livenessMs: number;
   pollMs: number;
   contextLimits: Record<string, number>;
-  providers: Record<string, boolean>;
   pricing: Record<string, ModelPricing>;
   tierThresholds: TierThresholds;
   port: number;

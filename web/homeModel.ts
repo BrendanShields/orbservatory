@@ -1,4 +1,4 @@
-import type { SessionStats, SessionSource, SessionSummary, SessionTier, TokenTotals } from '../shared/schema';
+import type { SessionStats, SessionSummary, SessionTier, TokenTotals } from '../shared/schema';
 
 /** One Home row: cheap summary always present, stats fill in as parses land. */
 export interface HomeRow {
@@ -11,7 +11,6 @@ export interface HomeFilter {
   text: string;
   /** Session ids matched by server full-text search; null = no server results yet/none pending. */
   textIds: Set<string> | null;
-  source: SessionSource | 'all';
   project: string | 'all';
   model: string | 'all';
   tier: SessionTier | 'all';
@@ -21,7 +20,7 @@ export interface HomeFilter {
 }
 
 export const EMPTY_FILTER: HomeFilter = {
-  text: '', textIds: null, source: 'all', project: 'all', model: 'all',
+  text: '', textIds: null, project: 'all', model: 'all',
   tier: 'all', skill: 'all', tool: 'all', liveOnly: false,
 };
 
@@ -51,7 +50,6 @@ export function filterRows(rows: HomeRow[], f: HomeFilter): HomeRow[] {
   return rows.filter((row) => {
     const { sum, stats } = row;
     if (f.liveOnly && !sum.live) return false;
-    if (f.source !== 'all' && sum.source !== f.source) return false;
     if (f.project !== 'all' && (sum.projectName || sum.project) !== f.project) return false;
     // Stats-backed facets: a session without stats yet can't prove a match — hide it
     // while the facet is active rather than showing false positives.

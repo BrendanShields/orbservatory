@@ -499,7 +499,7 @@ function updateEmptyState() {
   if (!show) return;
   const head = connected ? 'No live sessions' : transport.connecting ? 'Connecting…' : 'Disconnected';
   const sub = connected
-    ? 'Start a coding agent (Claude Code, Codex, opencode, Copilot, pi) in any project, press ⌘K to pick a past session, or import a replay.'
+    ? 'Start Claude Code in any project, press ⌘K to pick a past session, or import a replay.'
     : 'Reconnecting to the local transcript stream…';
   emptyEl.innerHTML = html`<div class="empty-card"><span class="empty-dot ${connected ? 'on' : ''}"></span><h2>${head}</h2><p>${sub}</p>${connected ? raw('<button id="emptyImport" class="amber">Import a replay</button>') : ''}</div>`.s;
   const b = document.getElementById('emptyImport');

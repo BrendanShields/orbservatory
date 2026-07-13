@@ -1,12 +1,6 @@
-import { existsSync } from 'node:fs';
-import type { ClientMessage, SearchRequest, SearchResponse, ServerMessage, SessionSource, Settings, TranscriptResponse } from '../shared/schema';
+import type { ClientMessage, SearchRequest, SearchResponse, ServerMessage, Settings, TranscriptResponse } from '../shared/schema';
 import { SessionStore, type SessionState, type Subscriber } from './store';
 import { ClaudeProjectWatcher } from './providers/claude';
-import { CodexProvider, defaultCodexRoot } from './providers/codex';
-import { OpencodeProvider, defaultOpencodeDataDir, findOpencodeDb } from './providers/opencode';
-import { CopilotProvider, defaultCopilotRoot } from './providers/copilot';
-import { PiProvider, defaultPiRoot } from './providers/pi';
-import type { SessionProvider } from './providers/types';
 import type { TranscriptQuery } from './transcript';
 import { StatsCache } from './statsCache';
 import { searchDocs } from './searchIndex';
@@ -28,7 +22,7 @@ export class VisualiserRuntime {
 
   store!: SessionStore;
 
-  private providers = new Map<SessionSource, SessionProvider>();
+  private provider: ClaudeProjectWatcher | null = null;
   private statsCache = new StatsCache();
   private started = false;
 
@@ -46,55 +40,22 @@ export class VisualiserRuntime {
       pricing: this.settings.get().pricing,
       tierThresholds: this.settings.get().tierThresholds,
     });
-    this.syncProviders(this.settings.get());
+    this.provider = new ClaudeProjectWatcher(this.store, { root: cfg.root, pollMs: cfg.pollMs, livenessMs: cfg.livenessMs, statsCache: this.statsCache });
+    this.provider.start();
     this.started = true;
-  }
-
-  private providerFactories(): Record<SessionSource, () => SessionProvider | null> {
-    const cfg = resolveConfig(this.settings.get());
-    return {
-      claude: () => new ClaudeProjectWatcher(this.store, { root: cfg.root, pollMs: cfg.pollMs, livenessMs: cfg.livenessMs, statsCache: this.statsCache }),
-      codex: () => (existsSync(defaultCodexRoot()) ? new CodexProvider(this.store, { pollMs: cfg.pollMs, livenessMs: cfg.livenessMs }) : null),
-      opencode: () => (findOpencodeDb(defaultOpencodeDataDir()) ? new OpencodeProvider(this.store, { pollMs: cfg.pollMs, livenessMs: cfg.livenessMs }) : null),
-      copilot: () => (existsSync(defaultCopilotRoot()) ? new CopilotProvider(this.store, { pollMs: cfg.pollMs, livenessMs: cfg.livenessMs }) : null),
-      pi: () => (existsSync(defaultPiRoot()) ? new PiProvider(this.store, { pollMs: cfg.pollMs, livenessMs: cfg.livenessMs }) : null),
-    };
-  }
-
-  private syncProviders(s: Settings) {
-    const factories = this.providerFactories();
-    for (const source of Object.keys(factories) as SessionSource[]) {
-      const want = s.providers[source] !== false;
-      const running = this.providers.get(source);
-      if (want && !running) {
-        try {
-          const p = factories[source]();
-          if (p) { p.start(); this.providers.set(source, p); }
-        } catch (err) {
-          console.error(`[${source}] provider failed to start; continuing without it`, err);
-        }
-      } else if (!want && running) {
-        running.stop();
-        this.providers.delete(source);
-      }
-    }
   }
 
   private applySettings(s: Settings) {
     this.store.setLivenessMs(s.livenessMs);
     this.store.setContextLimits(s.contextLimits);
     this.store.setStatsConfig(s.pricing, s.tierThresholds);
-    this.syncProviders(s);
-    for (const p of this.providers.values()) {
-      p.setLivenessMs(s.livenessMs);
-      p.setPollMs(s.pollMs);
-    }
+    this.provider?.setLivenessMs(s.livenessMs);
+    this.provider?.setPollMs(s.pollMs);
   }
 
   async ensureLoaded(state: SessionState) {
     await this.ready;
-    const provider = this.providers.get(state.source);
-    if (provider) await provider.ensureLoaded(state);
+    if (this.provider) await this.provider.ensureLoaded(state);
   }
 
   async sessions() {
@@ -136,9 +97,8 @@ export class VisualiserRuntime {
     await this.ready;
     const state = this.store.get(id);
     if (!state) return null;
-    const provider = this.providers.get(state.source);
-    if (!provider?.transcript) return { unsupported: true };
-    const res = await provider.transcript(state, q);
+    if (!this.provider?.transcript) return { unsupported: true };
+    const res = await this.provider.transcript(state, q);
     return res ?? { unsupported: true };
   }
 
@@ -165,8 +125,8 @@ export class VisualiserRuntime {
 
   close() {
     if (!this.started) return;
-    for (const p of this.providers.values()) p.stop();
-    this.providers.clear();
+    this.provider?.stop();
+    this.provider = null;
     this.started = false;
   }
 }

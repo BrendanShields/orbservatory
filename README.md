@@ -1,6 +1,6 @@
 # orbservatory
 
-A local web app that visualises Claude Code, Codex, opencode, GitHub Copilot, and pi coding sessions as a live animated agent graph. It watches local transcript/session stores, normalizes them into the AWV (Agentic Workflow Visualizer) schema, and streams sessions over WebSocket to a canvas frontend with timeline replay.
+A local web app that visualises Claude Code sessions as a live animated agent graph. It watches your local transcripts, normalizes them into the AWV (Agentic Workflow Visualizer) schema, and streams sessions over WebSocket to a canvas frontend with timeline replay.
 
 ## Install
 
@@ -50,8 +50,6 @@ By default the server scans Claude Code transcripts from `~/.claude/projects`. F
 CLAUDE_PROJECTS_DIR=/path/to/projects pnpm dev
 ```
 
-Other providers are discovered automatically when their stores exist: Codex (`~/.codex/sessions`, or `CODEX_HOME`), opencode (`~/.local/share/opencode`, or `OPENCODE_DATA_DIR`/`XDG_DATA_HOME`; needs Node ≥ 22.13 for `node:sqlite`), GitHub Copilot CLI (`~/.copilot/session-state`, or `COPILOT_HOME`), and pi (`~/.pi/agent/sessions`, or `PI_CODING_AGENT_DIR`/`PI_CODING_AGENT_SESSION_DIR`). Each can be toggled in settings.
-
 ## App structure
 
 This project is now a Next.js App Router app:
@@ -61,15 +59,15 @@ This project is now a Next.js App Router app:
 - `app/globals.css` — imports the existing canvas UI stylesheet
 - `app/api/**/route.ts` — route handlers for health, sessions, settings, search, and export
 - `scripts/next-server.ts` — custom Node server that runs Next and upgrades `/ws` WebSocket connections
-- `server/runtime.ts` — shared singleton runtime for settings, providers, store, search, and WebSocket subscribers
+- `server/runtime.ts` — shared singleton runtime for settings, the transcript watcher, store, search, and WebSocket subscribers
 
 The visualisation UI itself is still the existing canvas app under `web/`, mounted through `web/app.tsx` as a client component. Shared wire types live in `shared/`.
 
 ## Settings
 
-User settings persist to an OS-appropriate config dir (`~/Library/Application Support/orbservatory/settings.json` on macOS, `$XDG_CONFIG_HOME/orbservatory/` on Linux, `%APPDATA%\orbservatory\` on Windows; override with `ORBSERVATORY_CONFIG_DIR`): palette, layout, grid, liveness window, poll interval, per-model context limits, providers, pricing, and port.
+User settings persist to an OS-appropriate config dir (`~/Library/Application Support/orbservatory/settings.json` on macOS, `$XDG_CONFIG_HOME/orbservatory/` on Linux, `%APPDATA%\orbservatory\` on Windows; override with `ORBSERVATORY_CONFIG_DIR`): palette, layout, grid, liveness window, poll interval, per-model context limits, pricing, and port.
 
-All of these are editable from the in-app **⚙ Settings** panel. Palette and layout apply instantly; grid, liveness window, poll interval, provider toggles, and per-model context limits apply live; a changed port is saved but takes effect on the next restart.
+All of these are editable from the in-app **⚙ Settings** panel. Palette and layout apply instantly; grid, liveness window, poll interval, and per-model context limits apply live; a changed port is saved but takes effect on the next restart.
 
 Useful endpoints:
 

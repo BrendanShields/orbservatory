@@ -31,16 +31,15 @@ describe('filterRows', () => {
   const rows = rowsOf([
     [sum('a', { live: true, projectName: 'alpha' }), stats('a', { tier: 'complex', skills: { dataviz: 2 }, models: ['claude-opus-4-8'] })],
     [sum('b', { projectName: 'beta', title: 'Fix flaky CI' }), stats('b', { tier: 'simple', toolBreakdown: { Grep: 4 } })],
-    [sum('c', { projectName: 'alpha', source: 'codex' }), undefined],
+    [sum('c', { projectName: 'alpha' }), undefined],
   ]);
 
   test('empty filter keeps everything', () => {
     expect(filterRows(rows, EMPTY_FILTER).length).toBe(3);
   });
 
-  test('liveOnly / source / project facets use summaries (work without stats)', () => {
+  test('liveOnly / project facets use summaries (work without stats)', () => {
     expect(filterRows(rows, { ...EMPTY_FILTER, liveOnly: true }).map((r) => r.sum.id)).toEqual(['a']);
-    expect(filterRows(rows, { ...EMPTY_FILTER, source: 'codex' }).map((r) => r.sum.id)).toEqual(['c']);
     expect(filterRows(rows, { ...EMPTY_FILTER, project: 'alpha' }).map((r) => r.sum.id)).toEqual(['a', 'c']);
   });
 

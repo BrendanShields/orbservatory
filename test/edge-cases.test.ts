@@ -3,8 +3,6 @@ import { mkdtemp, mkdir, writeFile, appendFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TranscriptNormalizer, type TranscriptSource } from '../server/normalizer';
-import { CodexNormalizer } from '../server/providers/codex-normalizer';
-import { OpencodeNormalizer } from '../server/providers/opencode-normalizer';
 import { tailLines, type FileCursor } from '../server/providers/tail';
 import { SessionStore } from '../server/store';
 import { ClaudeProjectWatcher } from '../server/watch';
@@ -70,89 +68,6 @@ test('image-only prompts still produce a message event', () => {
     { type: 'user', timestamp: '2026-07-06T00:00:00Z', message: { content: [{ type: 'image', source: {} }] } },
   ]);
   expect(events.some((e) => e.type === 'message' && (e as any).label.includes('image'))).toBe(true);
-});
-
-// --- Codex: plain-text tool output, aborted turns, explicit compaction ---
-
-function codexFeed(recs: unknown[]) {
-  const n = new CodexNormalizer({ threadId: 'thread1' });
-  const events = [] as any[];
-  for (const r of recs) events.push(...n.normalizeLine(JSON.stringify(r), { kind: 'root', threadId: 'thread1' }).events);
-  return events;
-}
-
-test('codex plain-text shell output with non-zero exit becomes an error with exitCode', () => {
-  const events = codexFeed([
-    { type: 'session_meta', timestamp: '2026-07-06T00:00:00Z', payload: { id: 'thread1', cwd: '/x' } },
-    { type: 'response_item', timestamp: '2026-07-06T00:00:01Z', payload: { type: 'function_call', name: 'shell', call_id: 'c1', arguments: '{"command":"make"}' } },
-    { type: 'response_item', timestamp: '2026-07-06T00:00:02Z', payload: { type: 'function_call_output', call_id: 'c1', output: 'Chunk ID: d2897b\nWall time: 0.1 seconds\nProcess exited with code 2\nOutput:\nmake: *** No rule to make target' } },
-  ]);
-  const tool = events.find((e) => e.type === 'tool') as any;
-  expect(tool.exitCode).toBe(2);
-  const err = events.find((e) => e.type === 'error') as any;
-  expect(err.label).toContain('make:');
-});
-
-test('codex turn_aborted and failed patches surface as errors; compacted resets tokens', () => {
-  const events = codexFeed([
-    { type: 'session_meta', timestamp: '2026-07-06T00:00:00Z', payload: { id: 'thread1', cwd: '/x' } },
-    { type: 'event_msg', timestamp: '2026-07-06T00:00:01Z', payload: { type: 'turn_aborted', reason: 'interrupted' } },
-    { type: 'event_msg', timestamp: '2026-07-06T00:00:02Z', payload: { type: 'patch_apply_end', success: false } },
-    { type: 'compacted', timestamp: '2026-07-06T00:00:03Z', payload: { message: 'compacted' } },
-  ]);
-  const errors = events.filter((e) => e.type === 'error') as any[];
-  expect(errors.some((e) => e.label.includes('interrupted'))).toBe(true);
-  expect(errors.some((e) => e.label.includes('patch'))).toBe(true);
-  expect(events.some((e) => e.type === 'compact')).toBe(true);
-});
-
-test('codex subagent source {other: name} resolves the display name', async () => {
-  // subagentName is internal to codex.ts; exercise via the provider head path instead.
-  const { CodexProvider } = await import('../server/providers/codex');
-  const root = await mkdtemp(join(tmpdir(), 'cviz-codex-'));
-  try {
-    const parent = join(root, 'rollout-2026-07-06T00-00-00-019ef4f0-aaaa-4aaa-8aaa-aaaaaaaaaaaa.jsonl');
-    const sub = join(root, 'rollout-2026-07-06T00-01-00-019ef4f1-bbbb-4bbb-8bbb-bbbbbbbbbbbb.jsonl');
-    await writeFile(parent, JSON.stringify({ type: 'session_meta', timestamp: '2026-07-06T00:00:00Z', payload: { id: '019ef4f0-aaaa-4aaa-8aaa-aaaaaaaaaaaa', cwd: '/x' } }) + '\n'
-      + JSON.stringify({ type: 'event_msg', timestamp: '2026-07-06T00:00:01Z', payload: { type: 'user_message', message: 'hi' } }) + '\n');
-    await writeFile(sub, JSON.stringify({ type: 'session_meta', timestamp: '2026-07-06T00:01:00Z', payload: { id: '019ef4f1-bbbb-4bbb-8bbb-bbbbbbbbbbbb', thread_source: 'subagent', parent_thread_id: '019ef4f0-aaaa-4aaa-8aaa-aaaaaaaaaaaa', source: { subagent: { other: 'guardian' } } } }) + '\n'
-      + JSON.stringify({ type: 'event_msg', timestamp: '2026-07-06T00:01:01Z', payload: { type: 'agent_message', message: 'done' } }) + '\n');
-    const store = new SessionStore();
-    const provider = new CodexProvider(store, { root, pollMs: 60_000 });
-    await provider.scan();
-    const state = store.get('codex:019ef4f0-aaaa-4aaa-8aaa-aaaaaaaaaaaa')!;
-    const child = [...state.agents.values()].find((a) => a.role === 'subagent')!;
-    expect(child.name).toContain('guardian');
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-// --- opencode: cursor must not skip past pending rows ---
-
-test('opencode cursor holds before a pending assistant message until it completes', () => {
-  const n = new OpencodeNormalizer({ sessionId: 'root1' });
-  const agents = [] as any[];
-  const events = [] as any[];
-  n.applySessionRow({ id: 'root1', title: 't', directory: '/x', time: { created: 1000, updated: 1000 } }, true, agents, events);
-  // msg_01 pending (no completed), msg_02 terminal (user).
-  n.applyMessage('root1', 'msg_01', { id: 'msg_01', role: 'assistant', time: { created: 1100 } }, agents, events);
-  n.applyMessage('root1', 'msg_02', { id: 'msg_02', role: 'user', time: { created: 1200 } }, agents, events);
-  expect(n.messageCursor('root1')).toBe('');
-  // msg_01 completes on a later poll (re-read because cursor held) — now the cursor advances.
-  n.applyMessage('root1', 'msg_01', { id: 'msg_01', role: 'assistant', time: { created: 1100, completed: 1300 }, tokens: { input: 10, output: 5 }, modelID: 'm' }, agents, events);
-  n.applyMessage('root1', 'msg_02', { id: 'msg_02', role: 'user', time: { created: 1200 } }, agents, events);
-  expect(n.messageCursor('root1')).toBe('msg_02');
-  expect(events.some((e) => e.type === 'message' && e.from)).toBe(true);
-});
-
-test('opencode root spawn reaches the merged event stream', () => {
-  const n = new OpencodeNormalizer({ sessionId: 'root1' });
-  const agents = [] as any[];
-  const events = [] as any[];
-  n.applySessionRow({ id: 'root1', title: 't', directory: '/x', time: { created: 1000, updated: 1000 } }, true, agents, events);
-  expect(agents).toHaveLength(1);
-  expect(events.some((e) => e.type === 'spawn')).toBe(true);
 });
 
 // --- tail: UTF-8 split across polls, rewrite reset ---

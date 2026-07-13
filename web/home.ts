@@ -31,7 +31,7 @@ const SORT_LABELS: Record<SortKey, string> = {
 };
 
 const SKEL = raw('<span class="skel">…</span>');
-const FACETS = ['project', 'source', 'model', 'tier', 'skill', 'tool'] as const;
+const FACETS = ['project', 'model', 'tier', 'skill', 'tool'] as const;
 type FacetKey = typeof FACETS[number];
 const PAGE_SIZE = 25;
 
@@ -218,7 +218,6 @@ export class HomeView {
     };
     const changed = this.setHtml(this.els.facets, html`${[
       sel('project', 'project', this.filter.project, f.projects),
-      sel('source', 'source', this.filter.source, ['claude', 'codex', 'opencode', 'copilot', 'pi']),
       sel('model', 'model', this.filter.model, f.models),
       sel('tier', 'tier', this.filter.tier, ['simple', 'moderate', 'complex']),
       sel('skill', 'skill', this.filter.skill, f.skills),
@@ -324,7 +323,7 @@ export class HomeView {
 
   private renderList(visible: HomeRow[]) {
     if (!this.data.sessions.length) {
-      if (!this.setHtml(this.els.list, html`<div class="home-empty"><h2>${this.data.connected ? 'No sessions yet' : 'Connecting…'}</h2><p>${this.data.connected ? 'Start a coding agent (Claude Code, Codex, opencode, Copilot, pi) in any project — sessions appear here automatically. Or import a replay.' : 'Reconnecting to the local transcript stream…'}</p>${this.data.connected ? raw('<button id="homeImportEmpty" class="ghost">Import a replay</button>') : ''}</div>`.s)) return;
+      if (!this.setHtml(this.els.list, html`<div class="home-empty"><h2>${this.data.connected ? 'No sessions yet' : 'Connecting…'}</h2><p>${this.data.connected ? 'Start Claude Code in any project — sessions appear here automatically. Or import a replay.' : 'Reconnecting to the local transcript stream…'}</p>${this.data.connected ? raw('<button id="homeImportEmpty" class="ghost">Import a replay</button>') : ''}</div>`.s)) return;
       const b = this.els.list.querySelector<HTMLButtonElement>('#homeImportEmpty');
       if (b) b.onclick = () => this.cb.onImport();
       return;

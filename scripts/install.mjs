@@ -13,10 +13,6 @@ if (major < 20 || (major === 20 && minor < 9)) {
   console.error(`Node ${process.versions.node} is too old — need >= 20.9 (https://nodejs.org)`);
   process.exit(1);
 }
-if (major < 22 || (major === 22 && minor < 13)) {
-  console.warn(`note: Node ${process.versions.node} < 22.13 — the opencode provider will be disabled (needs node:sqlite). Everything else works.`);
-}
-
 const pm = has('pnpm') ? 'pnpm' : 'npm';
 console.log(`installing dependencies with ${pm}…`);
 execSync(`${pm} install`, { stdio: 'inherit', cwd: root });

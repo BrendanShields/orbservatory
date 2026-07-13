@@ -1,7 +1,7 @@
 {
   "name": "orbservatory",
   "version": "0.1.2",
-  "description": "Visualise Claude Code, Codex, opencode, GitHub Copilot, and pi sessions as a live animated agent graph",
+  "description": "Visualise Claude Code sessions as a live animated agent graph",
   "license": "MIT",
   "author": "Brendan Shields <hello@brendanshields.dev>",
   "repository": {
@@ -10,10 +10,6 @@
   },
   "keywords": [
     "claude-code",
-    "codex",
-    "opencode",
-    "copilot",
-    "pi",
     "visualization",
     "agents",
     "transcript"

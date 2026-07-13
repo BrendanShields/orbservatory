@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with th
 
 ## What this is
 
-**orbservatory** — a local Next.js App Router web app that visualises Claude Code, Codex, opencode, and GitHub Copilot sessions as a live animated agent graph. It watches transcript/session stores, normalizes them into the AWV (Agentic Workflow Visualizer) schema, and streams sessions over WebSocket to a canvas frontend with timeline replay.
+**orbservatory** — a local Next.js App Router web app that visualises Claude Code sessions as a live animated agent graph. It watches the Claude transcript store, normalizes it into the AWV (Agentic Workflow Visualizer) schema, and streams sessions over WebSocket to a canvas frontend with timeline replay.
 
 The app runtime is **Next.js on Node** with a small custom server for `/ws`; the test suite still uses **Bun** (`bun test`).
 
@@ -35,9 +35,9 @@ Data flows one way: transcript/session store → provider → normalizer → sto
 
 **Runtime/server** (`server/`, `scripts/next-server.ts`):
 - `scripts/next-server.ts` — Node HTTP server that delegates regular requests to Next and upgrades `/ws` to a `ws` WebSocket server. Do not use bare `next start` for the live app unless you also replace the WebSocket bridge.
-- `runtime.ts` — process singleton that owns `SettingsStore`, `SessionStore`, provider startup, search, API helpers, and WebSocket subscribers. Route handlers and the custom WS server both use this singleton.
-- `providers/*` — provider-specific discovery/tailing for Claude, Codex, opencode, and Copilot. File slicing uses `server/fileSlice.ts`; opencode SQLite access is isolated behind `providers/opencode-db.ts`.
-- `normalizer.ts` and provider normalizers — convert raw provider records into AWV agents/events.
+- `runtime.ts` — process singleton that owns `SettingsStore`, `SessionStore`, the Claude watcher, search, API helpers, and WebSocket subscribers. Route handlers and the custom WS server both use this singleton.
+- `providers/claude.ts` — Claude transcript discovery/tailing. File slicing uses `server/fileSlice.ts`.
+- `normalizer.ts` — converts raw transcript records into AWV agents/events.
 - `store.ts` — holds per-session state, merges normalized batches, computes/broadcasts stats, and snapshots sessions.
 - `settings.ts` / `config.ts` — persisted user settings vs resolved runtime config.
 

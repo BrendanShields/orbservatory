@@ -16,8 +16,8 @@ const CR = 0x0d;
  * buffers a partial trailing line, and resets on truncation. Yields complete
  * lines to the callback in file order.
  *
- * Returns `reset: true` when the file shrank below the cursor (rewritten in
- * place — Codex compaction and pi migrations do this). In that case nothing is
+ * Returns `reset: true` when the file shrank below the cursor (a transcript
+ * rewritten in place). In that case nothing is
  * read this call: the caller must discard all state derived from the old
  * contents, then call again to ingest from offset 0.
  */
