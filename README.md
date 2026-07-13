@@ -17,9 +17,7 @@ cd orbservatory
 node scripts/install.mjs
 ```
 
-Checks your Node version (>= 20.9), installs dependencies with pnpm (or npm if pnpm is missing), and tells you if Bun is missing.
-
-**Do I need Bun?** No — the web app runs on Node alone. [Bun](https://bun.com) is only required for the optional terminal UIs below and for running the test suite (`pnpm test`).
+Checks your Node version (>= 20.9) and installs dependencies with pnpm (or npm if pnpm is missing).
 
 ## Terminal UIs
 
@@ -85,7 +83,5 @@ Useful endpoints:
 pnpm typecheck
 pnpm build
 pnpm lint
-pnpm test          # existing Bun test suite
+pnpm test
 ```
-
-Tests still use `bun:test` for the existing ingestion and UI model test suite.
