@@ -1,8 +1,9 @@
 import { expect, test } from 'bun:test';
-import { renderStats, renderTasks, fmtTokens, fmtDuration, bar, activityOf } from '../tui/render';
+import type { StyledText } from '@opentui/core';
+import { renderStats, renderTasks, tasksTitle, fmtTokens, fmtDuration, bar, sparkline, activityOf, SPINNER } from '../tui/render';
 import type { TuiState } from '../tui/client';
 
-const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
+const plain = (s: StyledText) => s.chunks.map((c) => c.text).join('');
 
 function baseState(over: Partial<TuiState> = {}): TuiState {
   return {
@@ -25,6 +26,8 @@ test('formatters', () => {
   expect(fmtDuration(3_720_000)).toBe('1h 2m');
   expect(bar(0.5, 10)).toBe('█████░░░░░');
   expect(bar(2, 4)).toBe('████');
+  expect(sparkline([0, 50, 100], 10)).toBe('▁▅█');
+  expect(sparkline([1], 10)).toBe('');
 });
 
 test('activity derivation: working, idle, ended', () => {
@@ -51,8 +54,9 @@ test('stats frame shows context bar and cost', () => {
     } as any,
     tasks: [{ subject: 'a', status: 'completed' }, { subject: 'b', status: 'pending' }],
   });
-  const out = strip(renderStats(state, 60, now));
-  expect(out).toContain('fix login');
+  const out = plain(renderStats(state, 60, now, 3, [0, 100_000, 410_000]));
+  expect(out).toContain(SPINNER[3]);
+  expect(out).toContain('▁▂█');
   expect(out).toContain('working');
   expect(out).toContain('claude-fable-5');
   expect(out).toContain('410k / 1.00M');
@@ -71,16 +75,16 @@ test('tasks frame orders in-progress first and truncates to height', () => {
       { subject: 'later thing', status: 'pending' },
     ],
   });
-  const out = strip(renderTasks(state, 40, 6));
+  const out = plain(renderTasks(state, 40, 5));
   const rows = out.split('\n').filter((l) => l.trim().startsWith('◐') || l.trim().startsWith('○') || l.trim().startsWith('●'));
   expect(rows[0]).toContain('current thing');
   expect(out).toContain('…1 more');
-  expect(out).toContain('1/4');
+  expect(tasksTitle(state)).toBe(' tasks 1/4 ');
 });
 
 test('frames surface connection problems', () => {
-  const out = strip(renderStats(baseState({ connection: 'reconnecting' }), 40, 0));
+  const out = plain(renderStats(baseState({ connection: 'reconnecting' }), 40, 0));
   expect(out).toContain('reconnecting…');
-  const waiting = strip(renderTasks(baseState({ connection: 'waiting' }), 40, 10));
+  const waiting = plain(renderTasks(baseState({ connection: 'waiting' }), 40, 10));
   expect(waiting).toContain('waiting for session');
 });

@@ -9,6 +9,25 @@ npx orbservatory          # run it without installing
 npm install -g orbservatory && orbservatory
 ```
 
+### From a clone (web app + terminal UIs)
+
+```bash
+git clone https://github.com/BrendanShields/orbservatory
+cd orbservatory
+node scripts/install.mjs
+```
+
+Checks your Node version (>= 20.9), installs dependencies with pnpm (or npm if pnpm is missing), and tells you if Bun is missing. The web app needs only Node; the terminal UIs below also need [Bun](https://bun.com).
+
+## Terminal UIs
+
+Live panes for a single Claude Code session, rendered with OpenTUI (works in ghostty, iTerm2, Windows Terminal). The server must be running (`pnpm start` or `npx orbservatory`):
+
+```bash
+bun tui/orb-stats.ts --session <claude-session-id>   # state, context bar, tokens, cost, tools
+bun tui/orb-tasks.ts --session <claude-session-id>   # live task list
+```
+
 ## Running from source
 
 ```bash

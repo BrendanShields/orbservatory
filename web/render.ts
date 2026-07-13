@@ -559,6 +559,21 @@ export class VisualRenderer {
       const pathTo = (frac: number) => { x.beginPath(); x.moveTo(p.x, p.y); if (frac >= .999) x.quadraticCurveTo(c.cx, c.cy, n.x, n.y); else for (let k=1;k<=16;k++) { const q=this.qPt(p.x,p.y,c.cx,c.cy,n.x,n.y,(k/16)*frac); x.lineTo(q.x,q.y); } };
       if (this.edgeStyle === 'beams') { x.strokeStyle = `rgba(${r2},${g2},${b2},${(recent[n.id] != null ? .1 : .045) * this.glow * fade})`; x.lineWidth = 6; pathTo(end); x.stroke(); }
       x.strokeStyle = gr; x.lineWidth = 1.1; pathTo(end); x.stroke();
+      // Living energy: light pulses stream parent→child along active/recent edges.
+      const cs = statusAt(n.a, T, this.liveNow);
+      if (!this.reduceMotion && (cs === 'active' || recent[n.id] != null) && fade > 0) {
+        const spr = this.glowSprite(nc), N = 3, speed = 0.5, dark = this.mode() === 'dark';
+        if (dark) x.globalCompositeOperation = 'lighter';
+        for (let k = 0; k < N; k++) {
+          const fr = (((T / 1000) * speed + k / N) % 1) * end;
+          const q = this.qPt(p.x, p.y, c.cx, c.cy, n.x, n.y, fr);
+          const sz = (6.5 + 2.5 * Math.sin(T / 300 + k * 2)) * this.glow;
+          x.globalAlpha = (cs === 'active' ? .55 : .28) * fade * Math.sin(Math.PI * fr);
+          x.drawImage(spr, q.x - sz / 2, q.y - sz / 2, sz, sz);
+        }
+        x.globalAlpha = 1;
+        if (dark) x.globalCompositeOperation = 'source-over';
+      }
     }
     this.drawEffects(T, x);
     for (const n of this.nodes.values()) this.drawNode(T, x, n, recent[n.id] != null);
@@ -600,7 +615,7 @@ export class VisualRenderer {
     const a=n.a, gone=this.goneFrac(a,T); if(gone>=1)return; const vis=1-gone, rr=n.r*this.grow(a,T); if(rr<.5)return;
     const col=colorOf(a), status=statusAt(a,T,this.liveNow), tok=tokensAt(a,T), lim=a.def.limit||1000000, pct=Math.min(1,tok/lim), dim=status==='complete'||status==='idle', pd=this.powerDown(a,T), breathe=(status==='active'&&!this.reduceMotion)?1+.08*Math.sin(T/260+hash(a.id)):1;
     const th=this.theme();
-    const halo=rr*(4.6+(recent?1.6:0)+n.hov*1.3)*breathe*this.glow*(dim ? .38 : 1)*vis; if(halo>1)x.drawImage(this.glowSprite(status==='error'?'#ff7a70':col),n.x-halo/2,n.y-halo/2,halo,halo);
+    const halo=rr*(4.6+(recent?1.6:0)+n.hov*1.3)*breathe*this.glow*(dim ? .38 : 1)*vis; if(halo>1){const bl=this.mode()==='dark'; if(bl)x.globalCompositeOperation='lighter'; x.drawImage(this.glowSprite(status==='error'?'#ff7a70':col),n.x-halo/2,n.y-halo/2,halo,halo); if(bl)x.globalCompositeOperation='source-over';}
     x.globalAlpha=(status==='idle'?.48:(status==='complete'?.75-pd*.4:1))*vis; x.drawImage(this.orbSprite(status==='error'?'#ff7a70':col,n.r,dim),n.x-rr,n.y-rr,rr*2,rr*2); x.globalAlpha=1;
     if(pd>0&&vis>0){x.fillStyle=`rgba(${th.pdRgb},${pd*.66*vis})`;x.beginPath();x.arc(n.x,n.y,rr,0,7);x.fill();}
     x.strokeStyle=`rgba(${th.ringRgb},${(.13+.14*n.hov)*vis})`; x.lineWidth=1.6; x.beginPath(); x.arc(n.x,n.y,rr+4.5,0,7); x.stroke();
@@ -614,9 +629,9 @@ export class VisualRenderer {
   private grow(a: EngineAgent, t: number): number {
     const p = (t - a.spawnT) / 450;
     if (this.reduceMotion || p >= 1) return 1;
-    if (p <= 0) return 0;
     const q = p - 1, c1 = 1.70158;
-    return 1 + (c1 + 1) * q * q * q + c1 * q * q;
+    // Floor at .5 so a live/parked agent never collapses to an invisible orb with floating labels.
+    return Math.max(0.5, 1 + (c1 + 1) * q * q * q + c1 * q * q);
   }
 
   private drawLabels(T: number, x: CanvasRenderingContext2D, w: number, h: number) {

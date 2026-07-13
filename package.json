@@ -23,13 +23,16 @@
   },
   "type": "module",
   "bin": {
-    "orbservatory": "./scripts/cli.mjs"
+    "orbservatory": "./scripts/cli.mjs",
+    "orb-stats": "./tui/orb-stats.ts",
+    "orb-tasks": "./tui/orb-tasks.ts"
   },
   "files": [
     "app",
     "server",
     "web",
     "shared",
+    "tui",
     "scripts",
     "public",
     "next.config.ts",
@@ -51,18 +54,19 @@
     "next:dev": "next dev",
     "next:start": "next start",
     "test": "bun test",
-    "stats": "tsx tui/orb-stats.ts",
-    "tasks": "tsx tui/orb-tasks.ts",
+    "stats": "bun tui/orb-stats.ts",
+    "tasks": "bun tui/orb-tasks.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint",
     "prepack": "next build && node scripts/scrub-build.mjs"
   },
   "dependencies": {
+    "@opentui/core": "^0.4.3",
     "next": "16.2.10",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "ws": "^8.18.3",
-    "tsx": "^4.21.0"
+    "tsx": "^4.21.0",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "@types/bun": "^1.2.0",

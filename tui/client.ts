@@ -130,24 +130,3 @@ export async function runClient(sessionId: string, onState: (s: TuiState) => voi
 export function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
-
-/** Alt-screen render loop: coalesces updates and restores the terminal on exit. */
-export function makeScreen(render: () => string): () => void {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const draw = () => {
-    timer = null;
-    process.stdout.write('\x1b[2J\x1b[H' + render());
-  };
-  const restore = () => {
-    process.stdout.write('\x1b[?25h\x1b[?1049l');
-    process.exit(0);
-  };
-  process.stdout.write('\x1b[?1049h\x1b[?25l');
-  process.on('SIGINT', restore);
-  process.on('SIGTERM', restore);
-  process.stdout.on('resize', () => schedule());
-  const schedule = () => {
-    if (!timer) timer = setTimeout(draw, 80);
-  };
-  return schedule;
-}

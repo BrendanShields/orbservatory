@@ -217,6 +217,14 @@ function handle(msg: ServerMessage) {
   if (msg.type === 'sessions') {
     if (msg.bootId) serverBootId = msg.bootId;
     sessions = msg.sessions;
+    // A snapshot can arrive before its summary, so views cache live:false at build time.
+    // Re-sync liveness from the authoritative summary; frame loop then follows the live edge.
+    let activeLiveFlipped = false;
+    for (const v of views.values()) {
+      const s = summaryOf(v.id);
+      if (s && s.live !== v.live) { v.live = s.live; if (v === active) activeLiveFlipped = true; }
+    }
+    if (activeLiveFlipped && active) renderer.liveNow = active.live ? active.eng.duration : undefined;
     // Only resubscribe when the set of live sessions actually changed (server broadcasts summaries on any activity).
     if (!imported && route.view === 'live') {
       const key = sessions.filter(s => s.live).map(s => s.id).sort().join(',');
