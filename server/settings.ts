@@ -5,7 +5,7 @@ import type { Settings } from '../shared/schema';
 import { DEFAULT_TIER_THRESHOLDS } from './stats';
 
 export const DEFAULT_SETTINGS: Settings = {
-  palette: 'Deep Teal',
+  palette: 'Carbon',
   layout: 'organic',
   theme: 'system',
   canvasStyle: 'match',

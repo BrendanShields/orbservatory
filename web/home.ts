@@ -244,7 +244,9 @@ export class HomeView {
   }
 
   private renderLiveStrip(rows: HomeRow[]) {
-    const live = rows.filter((r) => r.sum.live);
+    const live = rows.filter((r) => r.sum.live)
+      .sort((a, b) => b.sum.lastActive - a.sum.lastActive)
+      .slice(0, 2);
     this.els.liveStrip.hidden = !live.length;
     if (!live.length) { this.setHtml(this.els.liveStrip, ''); return; }
     if (!this.setHtml(this.els.liveStrip, html`${live.map(({ sum, stats }) => html`

@@ -99,7 +99,7 @@ export class VisualRenderer {
   /** Live inspector element — measured for the camera gutter (the pane widens when the transcript tab is open). */
   inspectorEl?: HTMLElement;
   layout: LayoutMode = 'organic';
-  palette: PaletteName = 'Deep Teal';
+  palette: PaletteName = 'Carbon';
   resolvedTheme: CanvasMode = 'dark';
   canvasStyle: 'match' | 'dark' = 'match';
   glow = 1;
@@ -506,7 +506,7 @@ export class VisualRenderer {
     const w = cv.clientWidth, h = cv.clientHeight;
     if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
     x.setTransform(dpr, 0, 0, dpr, 0, 0); x.clearRect(0, 0, w, h);
-    const pal = (PALETTES[this.palette] || PALETTES['Deep Teal'])[this.mode()];
+    const pal = (PALETTES[this.palette] || PALETTES['Carbon'])[this.mode()];
     const bg = x.createRadialGradient(w / 2, h * .28, 40, w / 2, h * .28, Math.max(w, h));
     bg.addColorStop(0, pal.stops[0]); bg.addColorStop(.58, pal.stops[1]); bg.addColorStop(1, pal.stops[2]);
     x.fillStyle = bg; x.fillRect(0, 0, w, h);
